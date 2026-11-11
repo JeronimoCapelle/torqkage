@@ -122,3 +122,44 @@ impl SubprocessSupervisor {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "Unit test assertions"
+)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_timeout_kills_grandchildren_in_process_group() {
+        let pid_file = std::env::temp_dir().join(format!("tkg_sup_gc_{}", std::process::id()));
+        drop(std::fs::remove_file(&pid_file));
+
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(format!("sleep 60 & echo $! > {}; wait", pid_file.display()));
+        let res = SubprocessSupervisor::run_supervised(cmd, 1);
+        assert!(res.is_err(), "command must time out");
+
+        let grandchild: u32 = std::fs::read_to_string(&pid_file)
+            .expect("pid file written")
+            .trim()
+            .parse()
+            .expect("numeric pid");
+        let proc_path = std::path::PathBuf::from(format!("/proc/{grandchild}"));
+
+        let mut gone = false;
+        for _ in 0..50 {
+            if !proc_path.exists() {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        drop(std::fs::remove_file(&pid_file));
+        assert!(gone, "grandchild process {grandchild} leaked after timeout");
+    }
+}
