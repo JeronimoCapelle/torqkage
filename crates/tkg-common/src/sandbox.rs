@@ -19,8 +19,6 @@ where
 {
     // 1. Explicit environment variable set by tkg or outer orchestrator
     if env_lookup("TKG_OUTER_SANDBOX")
-        || env_lookup("SANDBOX")
-        || env_lookup("CONTAINER")
         || crate::harness::builtin_harnesses()
             .iter()
             .flat_map(|h| h.outer_sandbox_env_vars().iter())
@@ -172,8 +170,12 @@ mod tests {
     #[test]
     fn test_is_inside_container_env() {
         assert!(is_inside_container_with(|var| var == "AGY_OUTER_SANDBOX"));
-        assert!(is_inside_container_with(|var| var == "SANDBOX"));
-        assert!(is_inside_container_with(|var| var == "CONTAINER"));
+        // Generic, easily spoofed variables must not change the result versus a clean environment.
+        let baseline = is_inside_container_with(|_| false);
+        assert_eq!(
+            is_inside_container_with(|var| var == "SANDBOX" || var == "CONTAINER"),
+            baseline
+        );
     }
 
     #[test]
