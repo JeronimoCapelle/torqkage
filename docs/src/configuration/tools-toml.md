@@ -120,6 +120,7 @@ args = [
 | Setting | Type | Default | Description & Valid Variants |
 | :--- | :--- | :--- | :--- |
 | `enforce_sandbox` | Boolean | `false` | When `true`, the process is jailed inside a Bubblewrap container with a read-only root mount and isolated temporary directories.<br>Alias: `sandbox`. |
+| `allow_host_fallback` | Boolean | `false` | Only meaningful with `enforce_sandbox = true`. By default a sandboxed tool **fails closed** if `bwrap` is missing or cannot create namespaces. Set to `true` to let the tool run directly on the host in that case, but only when an outer sandbox/container is detected (e.g. Docker). Use it only if the outer environment already confines the tool. |
 | `enforce_workspace_bounds` | Boolean | `true` | Prevents path traversal vulnerabilities (`../`) and rejects any file paths resolving outside the workspace root. |
 | `ban_dangerous_files` | Boolean | `true` | Prevents the tool from reading, writing, or inspecting sensitive files (SSH keys, credentials, `.git/`, `.jj/`, shell rc files). |
 | `allowed_directories` | Array of strings | `[]` | Explicit directory whitelist. If non-empty, file operations are restricted strictly to these relative directories. |

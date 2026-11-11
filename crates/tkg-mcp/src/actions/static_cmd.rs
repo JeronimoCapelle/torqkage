@@ -33,7 +33,7 @@ pub(crate) fn execute(
         &[],
         workspace_root,
         tool.timeout_seconds,
-        tool.enforce_sandbox(),
+        (tool.enforce_sandbox(), tool.allow_host_fallback()),
         &tool.name,
     )?;
 

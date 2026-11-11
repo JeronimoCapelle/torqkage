@@ -108,10 +108,19 @@ pub struct ToolSafetyPolicy {
 }
 
 /// Sandbox and filesystem confinement boundaries.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Mirrors independent declarative tools.toml boolean policy flags"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ToolSandboxPolicy {
     #[serde(default)]
     pub enforce_sandbox: bool,
+    /// When `true`, a tool with `enforce_sandbox` may run directly on the host if `bwrap` is
+    /// unavailable or cannot create namespaces *and* an outer sandbox/container is detected.
+    /// Defaults to `false` (fail closed).
+    #[serde(default)]
+    pub allow_host_fallback: bool,
     #[serde(default)]
     pub enforce_workspace_bounds: bool,
     #[serde(default)]
@@ -160,6 +169,7 @@ pub struct RawTool {
     pub timeout_seconds: Option<u64>,
     pub require_permission_gate: Option<bool>,
     pub enforce_sandbox: Option<bool>,
+    pub allow_host_fallback: Option<bool>,
     pub sandbox: Option<bool>,
     pub require_gates: Option<Vec<String>>,
     pub skip_gates: Option<Vec<String>>,
@@ -245,6 +255,11 @@ impl ToolDefinition {
     }
 
     #[must_use]
+    pub const fn allow_host_fallback(&self) -> bool {
+        self.sandbox.allow_host_fallback
+    }
+
+    #[must_use]
     pub const fn enforce_workspace_bounds(&self) -> bool {
         self.sandbox.enforce_workspace_bounds
     }
@@ -325,6 +340,10 @@ fn resolve_sandbox(
 
     ToolSandboxPolicy {
         enforce_sandbox,
+        allow_host_fallback: resolve_fallback(raw.allow_host_fallback, base, category, |t| {
+            t.allow_host_fallback
+        })
+        .unwrap_or(false),
         enforce_workspace_bounds: resolve_fallback(
             raw.enforce_workspace_bounds,
             base,

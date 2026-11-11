@@ -137,7 +137,7 @@ pub(crate) fn execute_supervised_command(
     dynamic_args: &[String],
     workspace_root: &Path,
     timeout_seconds: u64,
-    enforce_sandbox: bool,
+    sandbox: (bool, bool),
     tool_name: &str,
 ) -> Result<std::process::Output, String> {
     execute_supervised_command_with_detector(
@@ -145,7 +145,7 @@ pub(crate) fn execute_supervised_command(
         (base_args, dynamic_args),
         workspace_root,
         timeout_seconds,
-        enforce_sandbox,
+        sandbox,
         tool_name,
         tkg_common::sandbox::is_inside_container,
     )
@@ -157,7 +157,7 @@ pub(crate) fn execute_supervised_command_with_detector<F>(
     args: (&[String], &[String]),
     workspace_root: &Path,
     timeout_seconds: u64,
-    enforce_sandbox: bool,
+    sandbox: (bool, bool),
     tool_name: &str,
     is_outer_sandbox: F,
 ) -> Result<std::process::Output, String>
@@ -171,6 +171,8 @@ where
     }
 
     let (base_args, dynamic_args) = args;
+    let (enforce_sandbox, allow_host_fallback) = sandbox;
+    let host_fallback_ok = || allow_host_fallback && is_outer_sandbox();
     let project_cfg = tkg_common::ProjectConfig::detect_or_load(workspace_root);
     let resolved_env = project_cfg.resolved_environment(workspace_root);
 
@@ -201,7 +203,7 @@ where
                     || stderr.contains("Operation not permitted");
 
                 if is_bwrap_setup_failure {
-                    if is_outer_sandbox() {
+                    if host_fallback_ok() {
                         let mut fallback_cmd = Command::new(program);
                         fallback_cmd.args(base_args);
                         fallback_cmd.args(dynamic_args);
@@ -210,12 +212,12 @@ where
                         return SubprocessSupervisor::run_supervised(fallback_cmd, timeout_seconds);
                     }
                     return Err(format!(
-                        "Security enforcement error: Sandbox execution failed for tool '{tool_name}': {stderr}"
+                        "Security enforcement error: Sandbox execution failed for tool '{tool_name}' (set `allow_host_fallback = true` only if an outer sandbox already confines this tool): {stderr}"
                     ));
                 }
             }
             Ok(out)
-        } else if is_outer_sandbox() {
+        } else if host_fallback_ok() {
             let mut cmd = Command::new(program);
             cmd.args(base_args);
             cmd.args(dynamic_args);
@@ -224,7 +226,7 @@ where
             SubprocessSupervisor::run_supervised(cmd, timeout_seconds)
         } else {
             Err(format!(
-                "Security enforcement error: Tool '{tool_name}' requires sandbox enforcement ('enforce_sandbox = true'), but 'bwrap' was not found on host."
+                "Security enforcement error: Tool '{tool_name}' requires sandbox enforcement ('enforce_sandbox = true'), but 'bwrap' was not found on host (set `allow_host_fallback = true` only if an outer sandbox already confines this tool)."
             ))
         }
     } else {

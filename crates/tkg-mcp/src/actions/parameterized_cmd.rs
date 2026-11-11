@@ -210,7 +210,7 @@ where
         (base_args, &dynamic_args),
         workspace_root,
         tool.timeout_seconds,
-        tool.enforce_sandbox(),
+        (tool.enforce_sandbox(), tool.allow_host_fallback()),
         &tool.name,
         is_outer_sandbox,
     )?;
@@ -518,6 +518,7 @@ mod tests {
             command: vec!["echo".to_owned()],
             sandbox: tkg_common::tools::ToolSandboxPolicy {
                 enforce_sandbox: true,
+                allow_host_fallback: true,
                 ..Default::default()
             },
             args: vec![ToolArg {
@@ -537,6 +538,37 @@ mod tests {
         let (out, is_err) = execute_with_detector(&tool, &temp, &args, || true).unwrap();
         assert!(!is_err);
         assert!(out.contains("sandboxed_payload"));
+    }
+
+    #[test]
+    fn test_outer_sandbox_without_opt_in_fails_closed() {
+        if which::which("bwrap").is_ok() {
+            // bwrap present: fallback path is not reached on a healthy host.
+            return;
+        }
+        let temp = create_test_dir("sandbox_closed");
+        let tool = ToolDefinition {
+            name: "test_closed_echo".to_owned(),
+            command: vec!["echo".to_owned()],
+            sandbox: tkg_common::tools::ToolSandboxPolicy {
+                enforce_sandbox: true,
+                ..Default::default()
+            },
+            args: vec![ToolArg {
+                name: "msg".to_owned(),
+                required: true,
+                regex: Some("^[a-zA-Z0-9_]+$".to_owned()),
+                ..Default::default()
+            }],
+            output_capture: OutputCapture::Stdout,
+            ..Default::default()
+        };
+        let args = json!({ "msg": "payload" });
+        let err = execute_with_detector(&tool, &temp, &args, || true).unwrap_err();
+        assert!(
+            err.contains("allow_host_fallback"),
+            "unexpected error: {err}"
+        );
     }
 
     fn is_bwrap_functional() -> bool {
