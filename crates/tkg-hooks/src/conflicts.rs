@@ -10,12 +10,23 @@ use tkg_common::{
 ///
 /// Inspects Jujutsu or Git for unresolved conflict markers. If any conflicts are detected,
 /// prints a `PreToolResponse::deny` JSON payload to `stdout`. Otherwise, prints `PreToolResponse::allow`.
-pub(crate) fn execute() {
+pub(crate) fn execute() -> std::process::ExitCode {
     let root = WorkspaceResolver::find_root(None).unwrap_or_else(|_| PathBuf::from("."));
 
     let response =
         detect_conflicts(&root).map_or_else(PreToolResponse::allow, PreToolResponse::deny);
     crate::stdin::write_pre_tool_use_response(&response);
+
+    if response.decision == tkg_common::HookDecision::Deny
+        && crate::stdin::is_claude_harness_for_root(&root)
+    {
+        if let Some(ref reason) = response.reason {
+            eprintln!("TorqKage policy violation: {reason}");
+        }
+        std::process::ExitCode::from(2)
+    } else {
+        std::process::ExitCode::SUCCESS
+    }
 }
 
 /// Checks whether any conflicts exist in the repository.

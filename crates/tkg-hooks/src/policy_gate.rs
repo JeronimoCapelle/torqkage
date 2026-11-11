@@ -13,12 +13,23 @@ use crate::stdin;
 ///
 /// Inspects incoming `PreToolUseInput` on `stdin`. Evaluates whether the requested tool
 /// requires human confirmation (`ask`) or is authorized for autonomous execution (`allow`).
-pub(crate) fn execute() {
+pub(crate) fn execute() -> std::process::ExitCode {
     let input = stdin::read_pre_tool_use_input();
     let root = input.common.resolve_workspace_root();
 
     let response = evaluate_policy(&input, &root);
     stdin::write_pre_tool_use_response(&response);
+
+    if response.decision == tkg_common::HookDecision::Deny
+        && stdin::is_claude_harness_for_root(&root)
+    {
+        if let Some(ref reason) = response.reason {
+            eprintln!("TorqKage policy violation: {reason}");
+        }
+        std::process::ExitCode::from(2)
+    } else {
+        std::process::ExitCode::SUCCESS
+    }
 }
 
 /// Evaluates a tool call against the granular security policy.

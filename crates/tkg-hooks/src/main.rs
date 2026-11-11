@@ -40,26 +40,14 @@ fn main() -> ExitCode {
     let command = args.get(1).map_or("help", String::as_str);
 
     match command {
-        "pre-tool-use" | "tool-use" => {
-            pre_tool_use::execute();
-            ExitCode::SUCCESS
-        },
+        "pre-tool-use" | "tool-use" => pre_tool_use::execute(),
         "detect-wip" => {
             wip::execute();
             ExitCode::SUCCESS
         },
-        "check-conflicts" => {
-            conflicts::execute();
-            ExitCode::SUCCESS
-        },
-        "check-subagent" => {
-            subagent_gate::execute();
-            ExitCode::SUCCESS
-        },
-        "enforce-tool-policy" => {
-            policy_gate::execute();
-            ExitCode::SUCCESS
-        },
+        "check-conflicts" => conflicts::execute(),
+        "check-subagent" => subagent_gate::execute(),
+        "enforce-tool-policy" => policy_gate::execute(),
         "record-handoff" => {
             handoff::execute_record_handoff();
             ExitCode::SUCCESS

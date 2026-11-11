@@ -273,10 +273,24 @@ impl HooksConfig {
     /// (see [`tkg_common::harness::config_file_candidates`]).
     #[must_use]
     pub(crate) fn load(workspace_root: &Path) -> Self {
-        if let Some(path) = tkg_common::harness::find_hooks_toml(workspace_root)
-            && let Ok(content) = std::fs::read_to_string(&path)
-        {
-            return parse_hooks_config(&content);
+        if let Some(path) = tkg_common::harness::find_hooks_toml(workspace_root) {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => match parse_hooks_config(&content) {
+                    Ok(cfg) => return cfg,
+                    Err(err) => {
+                        eprintln!(
+                            "tkg-hooks: error: failed to parse hooks configuration at '{}': {err}",
+                            path.display()
+                        );
+                    },
+                },
+                Err(err) => {
+                    eprintln!(
+                        "tkg-hooks: warning: failed to read hooks configuration at '{}': {err}",
+                        path.display()
+                    );
+                },
+            }
         }
 
         Self::default()
@@ -308,14 +322,17 @@ pub(crate) fn matches_pattern(text: &str, pattern: &str) -> bool {
 }
 
 /// Parses a `hooks.toml` string into a structured `HooksConfig`.
-#[must_use]
-pub(crate) fn parse_hooks_config(content: &str) -> HooksConfig {
-    toml::from_str(content).unwrap_or_default()
+///
+/// # Errors
+/// Returns [`toml::de::Error`] if the content fails TOML deserialization.
+pub(crate) fn parse_hooks_config(content: &str) -> Result<HooksConfig, toml::de::Error> {
+    toml::from_str(content)
 }
 
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::indexing_slicing,
     reason = "Unit test assertions and indexing"
 )]
@@ -351,7 +368,7 @@ decision = "deny"
 reason = "Disk is full"
 "#;
 
-        let parsed = parse_hooks_config(sample);
+        let parsed = parse_hooks_config(sample).expect("valid hooks config");
         assert_eq!(parsed.pre_tool_use.pipeline.len(), 4);
         assert_eq!(parsed.pre_tool_use.pipeline[0], "circuit_breaker");
         assert_eq!(parsed.pre_tool_use.custom_checks.len(), 1);
@@ -373,6 +390,16 @@ reason = "Disk is full"
         assert_eq!(
             parsed.pre_tool_use.custom_checks[0].decision,
             HookDecision::Deny
+        );
+    }
+
+    #[test]
+    fn test_parse_hooks_config_syntax_error() {
+        let malformed = "this is not valid toml = [[";
+        let err = parse_hooks_config(malformed);
+        assert!(
+            err.is_err(),
+            "malformed toml must return Err rather than failing open"
         );
     }
 }

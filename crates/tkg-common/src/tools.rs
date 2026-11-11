@@ -488,14 +488,26 @@ pub fn resolve(config: &RawToolsConfig) -> Vec<ToolDefinition> {
 }
 
 impl RawToolsConfig {
+    /// Parses a `tools.toml` content string into a `RawToolsConfig`.
+    ///
+    /// # Errors
+    /// Returns a [`crate::error::TkgError`] if the content fails TOML deserialization.
+    pub fn parse(content: &str) -> Result<Self, crate::error::TkgError> {
+        toml::from_str(content).map_err(crate::error::TkgError::from)
+    }
+
     /// Parses a `tools.toml` content string into a `RawToolsConfig`, returning an empty config on parse error.
     #[must_use]
     pub fn from_toml_str(content: &str) -> Self {
-        toml::from_str(content).unwrap_or_default()
+        Self::parse(content).unwrap_or_default()
     }
 
     /// Loads and merges `tools.toml` configurations across all candidate directories for `root`.
     #[must_use]
+    #[allow(
+        clippy::print_stderr,
+        reason = "Emits configuration parse diagnostics when loading tools.toml"
+    )]
     pub fn load_merged(root: &std::path::Path) -> Self {
         let ws_root =
             crate::WorkspaceResolver::find_root(Some(root)).unwrap_or_else(|_| root.to_path_buf());
@@ -510,13 +522,28 @@ impl RawToolsConfig {
         let mut merged = Self::default();
         // Load in reverse order so higher-priority candidates overwrite lower-priority ones
         for path in candidates.into_iter().rev() {
-            if path.is_file()
-                && let Ok(content) = std::fs::read_to_string(&path)
-                && let Ok(parsed) = toml::from_str::<Self>(&content)
-            {
-                merged.tools.extend(parsed.tools);
-                merged.base_tools.extend(parsed.base_tools);
-                merged.categories.extend(parsed.categories);
+            if path.is_file() {
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => match toml::from_str::<Self>(&content) {
+                        Ok(parsed) => {
+                            merged.tools.extend(parsed.tools);
+                            merged.base_tools.extend(parsed.base_tools);
+                            merged.categories.extend(parsed.categories);
+                        },
+                        Err(err) => {
+                            eprintln!(
+                                "tkg: error: failed to parse tool configuration at '{}': {err}",
+                                path.display()
+                            );
+                        },
+                    },
+                    Err(err) => {
+                        eprintln!(
+                            "tkg: warning: failed to read tool configuration at '{}': {err}",
+                            path.display()
+                        );
+                    },
+                }
             }
         }
         merged
@@ -622,5 +649,15 @@ mod tests {
         assert!(special.tracks_circuit_breaker());
         // vcs_conflicts was skipped!
         assert_eq!(special.preconditions.require_gates, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_raw_tools_config_parse_syntax_error() {
+        let malformed = "this is not valid toml = [[";
+        let err = RawToolsConfig::parse(malformed);
+        assert!(
+            err.is_err(),
+            "malformed toml must return Err rather than failing open"
+        );
     }
 }

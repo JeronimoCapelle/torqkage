@@ -11,6 +11,12 @@ pub enum TkgError {
     #[error("Serialization error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("TOML parse error: {0}")]
+    Toml(#[from] toml::de::Error),
+
+    #[error("Configuration parse error in '{path}': {message}")]
+    ConfigParse { path: String, message: String },
+
     #[error("Workspace error: {0}")]
     Workspace(String),
 

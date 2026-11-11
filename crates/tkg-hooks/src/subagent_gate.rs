@@ -11,10 +11,22 @@ use crate::stdin;
 /// it parses the target agent's declared `pre_launch_checks` and executes all specified gates.
 /// If any check fails, it outputs a blocking `PreToolResponse::deny` payload.
 /// Otherwise, outputs `PreToolResponse::allow`.
-pub(crate) fn execute() {
+pub(crate) fn execute() -> std::process::ExitCode {
     let input = stdin::read_pre_tool_use_input();
+    let root = input.common.resolve_workspace_root();
     let response = evaluate_tool_invocation(&input);
     stdin::write_pre_tool_use_response(&response);
+
+    if response.decision == tkg_common::HookDecision::Deny
+        && stdin::is_claude_harness_for_root(&root)
+    {
+        if let Some(ref reason) = response.reason {
+            eprintln!("TorqKage policy violation: {reason}");
+        }
+        std::process::ExitCode::from(2)
+    } else {
+        std::process::ExitCode::SUCCESS
+    }
 }
 
 /// Evaluates a tool invocation input and produces a `PreToolResponse`.

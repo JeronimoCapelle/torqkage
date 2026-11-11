@@ -385,13 +385,15 @@ fn update_circuit_breaker(
         Ok((mut output, is_error)) => {
             if is_error {
                 let error_sig = extract_compiler_error_signature(&output, custom_pattern);
-                drop(ledger.record_failure(
+                if let Err(e) = ledger.record_failure(
                     workspace_root,
                     agent_name,
                     Some(&tool.name),
                     error_sig.as_deref().or(Some("Quality gate failure")),
                     Some(&output),
-                ));
+                ) {
+                    eprintln!("tkg-mcp: warning: failed to record circuit breaker failure: {e}");
+                }
                 if ledger.tripped {
                     let banner = format!(
                         "\n\n🛑 [CIRCUIT BREAKER TRIPPED - {}/{} FAILURES]:\n\
@@ -406,8 +408,8 @@ fn update_circuit_breaker(
                     );
                     output.push_str(&banner);
                 }
-            } else {
-                drop(ledger.record_success(workspace_root, Some(&tool.name)));
+            } else if let Err(e) = ledger.record_success(workspace_root, Some(&tool.name)) {
+                eprintln!("tkg-mcp: warning: failed to record circuit breaker success: {e}");
             }
             Ok((output, is_error))
         },
@@ -417,13 +419,15 @@ fn update_circuit_breaker(
             }
 
             let error_sig = extract_compiler_error_signature(&err, custom_pattern);
-            drop(ledger.record_failure(
+            if let Err(e) = ledger.record_failure(
                 workspace_root,
                 agent_name,
                 Some(&tool.name),
                 error_sig.as_deref().or(Some("Execution failure")),
                 Some(&err),
-            ));
+            ) {
+                eprintln!("tkg-mcp: warning: failed to record circuit breaker failure: {e}");
+            }
             Err(err)
         },
     }

@@ -92,12 +92,65 @@ impl HookDialect for ProtoJsonDialect {
     }
 }
 
+/// Hook dialect tailored for Claude Code `PreToolUse` format.
+pub(crate) struct ClaudeCodeDialect;
+
+impl HookDialect for ClaudeCodeDialect {
+    fn parse_pre_tool_use(&self, raw: &str) -> Result<PreToolUseInput, serde_json::Error> {
+        ProtoJsonDialect.parse_pre_tool_use(raw)
+    }
+
+    fn format_pre_tool_use(&self, resp: &PreToolResponse) -> Result<String, serde_json::Error> {
+        let decision_str = match resp.decision {
+            tkg_common::HookDecision::Allow => "allow",
+            tkg_common::HookDecision::Deny => "deny",
+            tkg_common::HookDecision::Ask | tkg_common::HookDecision::ForceAsk => "ask",
+        };
+        let mut hook_output = serde_json::json!({
+            "hookType": "PreToolUse",
+            "permissionDecision": decision_str,
+        });
+        if let Some(ref reason) = resp.reason
+            && let Some(map) = hook_output.as_object_mut()
+        {
+            map.insert(
+                "permissionDenialReason".to_owned(),
+                serde_json::json!(reason),
+            );
+        }
+        serde_json::to_string(&serde_json::json!({
+            "hookSpecificOutput": hook_output
+        }))
+    }
+}
+
+static PROTO_JSON: ProtoJsonDialect = ProtoJsonDialect;
+static CLAUDE_CODE: ClaudeCodeDialect = ClaudeCodeDialect;
+
+/// Returns true if the current environment indicates execution under Claude Code.
+#[must_use]
+pub(crate) fn is_claude_harness() -> bool {
+    std::env::var("CLAUDE_PROJECT_DIR").is_ok()
+        || std::env::var("TKG_HARNESS").is_ok_and(|s| s.eq_ignore_ascii_case("claude"))
+}
+
+/// Returns true if execution is under Claude Code via environment or workspace configuration.
+#[must_use]
+pub(crate) fn is_claude_harness_for_root(root: &std::path::Path) -> bool {
+    is_claude_harness()
+        || tkg_common::harness::runner_for(root)
+            .harness
+            .eq_ignore_ascii_case("claude")
+}
+
 /// Returns the active [`HookDialect`].
-// TODO(harness): Dispatch to dedicated ClaudeCodeDialect / OpenCodeDialect response formatters
-// once per-harness hook output schemas (e.g., Claude Code `hookSpecificOutput` / exit code 2) are wired.
 #[must_use]
 pub(crate) fn active_dialect() -> &'static dyn HookDialect {
-    &ProtoJsonDialect
+    if is_claude_harness() {
+        &CLAUDE_CODE
+    } else {
+        &PROTO_JSON
+    }
 }
 
 fn read_raw_stdin() -> Option<String> {

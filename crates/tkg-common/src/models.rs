@@ -564,7 +564,7 @@ impl CircuitBreakerLedger {
         std::fs::create_dir_all(&dir)?;
         let data = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(dir.join(Self::FILE_NAME), data)
+        crate::state::atomic_write(&dir.join(Self::FILE_NAME), data.as_bytes())
     }
 
     /// Records a successful verification / compiler pass, resetting consecutive failures to 0.

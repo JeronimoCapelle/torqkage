@@ -175,7 +175,7 @@ impl HarnessDriver for ClaudeDriver {
         workspace_root: &Path,
         _runner: &tkg_common::ProjectRunnerConfig,
     ) -> (PathBuf, bool, bool) {
-        let p = workspace_root.join("claude.json");
+        let p = workspace_root.join(".mcp.json");
         let exists = p.is_file();
         (p, exists, false)
     }
@@ -516,9 +516,9 @@ pub(crate) fn register_opencode_config(workspace_root: &Path) -> Result<String, 
     ))
 }
 
-/// Registers `tkg-mcp` in `claude.json` for Claude Code integration.
+/// Registers `tkg-mcp` in `.mcp.json` for Claude Code integration.
 pub(crate) fn register_claude_config(workspace_root: &Path) -> Result<String, String> {
-    let config_path = workspace_root.join("claude.json");
+    let config_path = workspace_root.join(".mcp.json");
     let mut config: serde_json::Value = if config_path.is_file() {
         let content = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
@@ -547,12 +547,12 @@ pub(crate) fn register_claude_config(workspace_root: &Path) -> Result<String, St
     }
 
     let serialized = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize claude.json: {e}"))?;
+        .map_err(|e| format!("Failed to serialize .mcp.json: {e}"))?;
     std::fs::write(&config_path, serialized)
         .map_err(|e| format!("Failed to write {}: {e}", config_path.display()))?;
 
     Ok(format!(
-        "✔ Registered 'tkg-mcp' in claude.json at {}",
+        "✔ Registered 'tkg-mcp' in .mcp.json at {}",
         config_path.display()
     ))
 }
@@ -660,7 +660,7 @@ mod tests {
         // 2. Claude
         let claude_res = register_claude_config(&temp_ws);
         claude_res.unwrap();
-        let cl_file = temp_ws.join("claude.json");
+        let cl_file = temp_ws.join(".mcp.json");
         assert!(cl_file.is_file());
         let cl_content: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&cl_file).unwrap()).unwrap();

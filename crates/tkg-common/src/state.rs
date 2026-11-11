@@ -137,7 +137,7 @@ impl TkgStatePaths {
         // Self-protecting gitignore: guarantees git ignores .tkg in any project automatically
         let gitignore = self.root().join(".gitignore");
         if !gitignore.exists() {
-            drop(std::fs::write(&gitignore, "*\n"));
+            std::fs::write(&gitignore, "*\n")?;
         }
         Ok(())
     }
@@ -205,7 +205,7 @@ pub fn set_active_agent(workspace_root: &Path, agent_name: &str) -> std::io::Res
     atomic_write(&paths.active_agent_file(), &json_bytes)?;
 
     let txt_path = paths.state_dir().join("active_agent");
-    drop(atomic_write(&txt_path, agent_name.as_bytes()));
+    atomic_write(&txt_path, agent_name.as_bytes())?;
     Ok(())
 }
 

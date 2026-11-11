@@ -20,8 +20,20 @@ use tkg_common::{
 };
 
 fn run_hook_subcommand(subcmd: &str, stdin_json: Option<&str>) -> (bool, String, String) {
+    let (code, stdout, stderr) = run_hook_subcommand_with_env(subcmd, stdin_json, &[]);
+    (code == Some(0), stdout, stderr)
+}
+
+fn run_hook_subcommand_with_env(
+    subcmd: &str,
+    stdin_json: Option<&str>,
+    envs: &[(&str, &str)],
+) -> (Option<i32>, String, String) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_tkg-hooks"));
     cmd.arg(subcmd);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -47,7 +59,7 @@ fn run_hook_subcommand(subcmd: &str, stdin_json: Option<&str>) -> (bool, String,
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
 
-    (output.status.success(), stdout, stderr)
+    (output.status.code(), stdout, stderr)
 }
 
 #[test]
@@ -180,4 +192,55 @@ fn test_pre_tool_use_mutating_asks_e2e() {
     let resp: tkg_common::PreToolResponse =
         serde_json::from_str(&stdout).expect("valid PreToolResponse");
     assert_eq!(resp.decision, tkg_common::HookDecision::Ask);
+}
+
+#[test]
+fn test_claude_dialect_deny_returns_exit_code_2_e2e() {
+    let ws = std::env::temp_dir().join(format!("tkg_claude_deny_ws_{}", std::process::id()));
+    std::fs::create_dir_all(ws.join("plugins/torqkage/agents")).expect("create agents dir");
+    std::fs::create_dir_all(ws.join("tests")).expect("create tests dir");
+    std::fs::write(
+        ws.join("plugins/torqkage/agents/scoped_agent.md"),
+        "---\nname: scoped_agent\nallowed_dirs:\n  - docs\n---\n",
+    )
+    .expect("write manifest");
+
+    let payload = tkg_common::PreToolUseInput {
+        tool_call: Some(tkg_common::models::ToolCallPayload {
+            name: "custom_writer".to_owned(),
+            args: serde_json::json!({"path": "tests/test.rs", "content": "fn t() {}"}),
+        }),
+        common: tkg_common::CommonHookPayload {
+            workspace_paths: vec![ws.clone()],
+            model_name: Some("scoped_agent".to_owned()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let input_json = serde_json::to_string(&payload).expect("serialize payload");
+
+    // Default dialect: exit code 0, canonical JSON deny
+    let (code_proto, stdout_proto, _) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&input_json), &[]);
+    assert_eq!(code_proto, Some(0));
+    let resp: tkg_common::PreToolResponse =
+        serde_json::from_str(&stdout_proto).expect("valid PreToolResponse");
+    assert_eq!(resp.decision, tkg_common::HookDecision::Deny);
+
+    // Claude Code dialect: exit code 2, stderr diagnostics, hookSpecificOutput JSON
+    let (code_claude, stdout_claude, stderr_claude) = run_hook_subcommand_with_env(
+        "pre-tool-use",
+        Some(&input_json),
+        &[("TKG_HARNESS", "claude")],
+    );
+    assert_eq!(code_claude, Some(2), "stderr: {stderr_claude}");
+    assert!(stderr_claude.contains("TorqKage policy violation"));
+    let v: serde_json::Value = serde_json::from_str(&stdout_claude).expect("valid JSON");
+    assert_eq!(
+        v.pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+
+    std::fs::remove_dir_all(&ws).expect("cleanup");
 }
