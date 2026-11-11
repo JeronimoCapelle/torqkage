@@ -96,20 +96,47 @@ fn main() -> ExitCode {
             print_cli_usage();
             ExitCode::SUCCESS
         },
-        Some(agent_name) if !agent_name.starts_with('-') => {
+        Some("-r" | "--reset-breaker") => handle_breaker_cli(&workspace_root, "reset-breaker"),
+        Some(first) if first.starts_with('-') || !first.is_empty() => {
             let has_sandbox = args.iter().any(|a| a == "--sandbox");
             let has_isolated = args.iter().any(|a| a == "--isolated" || a == "--workspace");
-            handle_cli_launch(&workspace_root, Some(agent_name), has_sandbox, has_isolated)
-        },
-        _ => {
-            // Interactive Ratatui TUI Mode
-            if let Err(err) = run_tui(workspace_root) {
-                eprintln!("🛑 [tkg] TUI error: {err}");
-                ExitCode::FAILURE
-            } else {
-                ExitCode::SUCCESS
+            match find_agent_arg(&args) {
+                Some(agent_name) => {
+                    handle_cli_launch(&workspace_root, Some(agent_name), has_sandbox, has_isolated)
+                },
+                None if has_sandbox || has_isolated => {
+                    eprintln!(
+                        "🛑 [tkg] Missing agent name. Usage: tkg <AGENT> [--sandbox] [--isolated]"
+                    );
+                    ExitCode::FAILURE
+                },
+                None => run_tui_or_fail(workspace_root),
             }
         },
+        _ => run_tui_or_fail(workspace_root),
+    }
+}
+
+/// Resolves the agent name from `-a/--agent <name>` or the first positional (non-flag) argument.
+fn find_agent_arg(args: &[String]) -> Option<&str> {
+    let mut iter = args.iter().skip(1);
+    while let Some(arg) = iter.next() {
+        if arg == "-a" || arg == "--agent" {
+            return iter.next().map(String::as_str);
+        }
+        if !arg.starts_with('-') {
+            return Some(arg.as_str());
+        }
+    }
+    None
+}
+
+fn run_tui_or_fail(workspace_root: PathBuf) -> ExitCode {
+    if let Err(err) = run_tui(workspace_root) {
+        eprintln!("🛑 [tkg] TUI error: {err}");
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -570,6 +597,24 @@ fn handle_manual_keys(app: &mut App, code: KeyCode) {
     reason = "Unit test assertions"
 )]
 mod tests {
+    #[test]
+    fn test_find_agent_arg_is_order_independent() {
+        let v = |xs: &[&str]| xs.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            find_agent_arg(&v(&["tkg", "--sandbox", "coder"])),
+            Some("coder")
+        );
+        assert_eq!(
+            find_agent_arg(&v(&["tkg", "coder", "--sandbox"])),
+            Some("coder")
+        );
+        assert_eq!(
+            find_agent_arg(&v(&["tkg", "-a", "tester", "--sandbox"])),
+            Some("tester")
+        );
+        assert_eq!(find_agent_arg(&v(&["tkg", "--sandbox"])), None);
+    }
+
     use super::*;
 
     #[test]
