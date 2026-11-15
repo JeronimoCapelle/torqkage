@@ -541,33 +541,49 @@ impl ProjectConfig {
         paths
     }
 
-    /// Loads `<root>/.tkg/project.toml`, `<root>/project.toml`, or
-    /// `<root>/plugins/torqkage/project.toml`. If no explicit descriptor is
-    /// found, falls back to a blank/restrictive default configuration
-    /// with auto-detected documentation paths.
+    /// Loads and deep-merges global (`~/.config/tkg/config.toml`,
+    /// `~/.config/tkg/project.toml`, `~/.tkg/project.toml`), workspace
+    /// (`plugins/torqkage/project.toml`, `project.toml`, `.tkg/project.toml`,
+    /// `.tkg/config.toml`), and `TKG_PROJECT_CONFIG` / `TKG_HARNESS` layers.
     #[must_use]
     pub fn detect_or_load(workspace_root: &Path) -> Self {
-        let mut candidates = Vec::new();
-        if let Ok(custom) = std::env::var("TKG_PROJECT_CONFIG") {
-            candidates.push(PathBuf::from(custom));
-        }
-        candidates.push(workspace_root.join(".tkg/project.toml"));
-        candidates.push(workspace_root.join("project.toml"));
-        candidates.push(
-            workspace_root
-                .join(crate::harness::local_plugin_rel_dir())
-                .join("project.toml"),
-        );
-        if let Ok(home) = std::env::var("HOME") {
-            let home_path = PathBuf::from(home);
-            candidates.push(home_path.join(".tkg/project.toml"));
-            candidates.push(home_path.join(".config/tkg/project.toml"));
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        Self::detect_or_load_with_home(workspace_root, home.as_deref())
+    }
+
+    /// 4-tier cascaded loader parameterized by `home` for hermetic testing.
+    #[must_use]
+    pub fn detect_or_load_with_home(workspace_root: &Path, home: Option<&Path>) -> Self {
+        let mut paths = crate::cascade::project_cascade_paths(workspace_root, home);
+        if let Ok(custom) = std::env::var("TKG_PROJECT_CONFIG")
+            && !custom.trim().is_empty()
+        {
+            paths.push(PathBuf::from(custom));
         }
 
-        for path in &candidates {
+        let mut loader = crate::cascade::CascadedConfigLoader::new();
+        let mut explicit_harness_declared = false;
+        for path in &paths {
             if let Ok(content) = std::fs::read_to_string(path)
-                && let Ok(mut cfg) = parse_project_toml(&content)
+                && let Ok(_) = parse_project_toml(&content)
+                && loader.layer_str(Some(path), &content).is_ok()
             {
+                if has_explicit_harness(&content) {
+                    explicit_harness_declared = true;
+                }
+                loader.mark_file_loaded();
+            }
+        }
+
+        if loader.files_loaded() > 0 {
+            if let Ok(tkg_harness) = std::env::var("TKG_HARNESS")
+                && !tkg_harness.trim().is_empty()
+            {
+                loader.override_kv("runner.harness", toml::Value::String(tkg_harness));
+                explicit_harness_declared = true;
+            }
+            if let Ok(raw) = toml::Value::Table(loader.into_table()).try_into::<RawProjectToml>() {
+                let mut cfg = raw.into_project_config();
                 if cfg.docs.paths.is_empty() {
                     cfg.docs.paths = Self::detect_default_docs_paths(workspace_root);
                 }
@@ -575,7 +591,7 @@ impl ProjectConfig {
                     let inferred = Self::infer_from_workspace(workspace_root);
                     cfg.project.language = inferred.project.language;
                 }
-                if !has_explicit_harness(&content)
+                if !explicit_harness_declared
                     && let Some(detected) = crate::harness::detect_workspace_harness(workspace_root)
                 {
                     if let Some(ref mut h) = cfg.harness {
@@ -590,7 +606,11 @@ impl ProjectConfig {
 
         let mut cfg = Self::infer_from_workspace(workspace_root);
         cfg.docs.paths = Self::detect_default_docs_paths(workspace_root);
-        if let Some(detected) = crate::harness::detect_workspace_harness(workspace_root) {
+        if let Ok(tkg_harness) = std::env::var("TKG_HARNESS")
+            && !tkg_harness.trim().is_empty()
+        {
+            cfg.runner.harness = tkg_harness;
+        } else if let Some(detected) = crate::harness::detect_workspace_harness(workspace_root) {
             detected.clone_into(&mut cfg.runner.harness);
         }
         cfg
@@ -1126,6 +1146,12 @@ fn has_explicit_harness(content: &str) -> bool {
     let Ok(table) = toml::from_str::<toml::Table>(content) else {
         return false;
     };
+    if table
+        .get("default_harness")
+        .is_some_and(toml::Value::is_str)
+    {
+        return true;
+    }
     ["runner", "harness"].iter().any(|key| {
         table.get(*key).is_some_and(|val| {
             val.is_str()
@@ -1588,5 +1614,39 @@ resume_flag = "-r"
         assert_eq!(runner.resolved_binary(), "my-cli");
         assert_eq!(runner.resolved_agent_flag().as_deref(), Some("-a"));
         assert_eq!(runner.resolved_resume_flag().as_deref(), Some("-r"));
+    }
+
+    #[test]
+    fn test_detect_or_load_preserves_global_default_harness_across_tiers() {
+        let base = std::env::temp_dir().join(format!(
+            "tkg_cascade_proj_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let home_dir = base.join("home");
+        let global_cfg_dir = home_dir.join(".config/tkg");
+        let ws = base.join("workspace");
+        let local_cfg_dir = ws.join(".tkg");
+        std::fs::create_dir_all(&global_cfg_dir).unwrap();
+        std::fs::create_dir_all(&local_cfg_dir).unwrap();
+
+        std::fs::write(
+            global_cfg_dir.join("config.toml"),
+            "default_harness = \"claude\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            local_cfg_dir.join("config.toml"),
+            "[sandbox]\nbind_mounts = [\".build-cache\"]\n",
+        )
+        .unwrap();
+
+        let cfg = ProjectConfig::detect_or_load_with_home(&ws, Some(&home_dir));
+        assert_eq!(cfg.resolved_runner().harness, "claude");
+        assert_eq!(cfg.sandbox.bind_mounts, vec![".build-cache"]);
+
+        _ = std::fs::remove_dir_all(&base);
     }
 }

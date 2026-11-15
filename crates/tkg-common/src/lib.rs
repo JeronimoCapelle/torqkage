@@ -33,6 +33,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cascade;
 pub mod content_filter;
 pub mod error;
 pub mod frontmatter;

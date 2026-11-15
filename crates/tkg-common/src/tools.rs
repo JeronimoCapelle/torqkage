@@ -614,19 +614,17 @@ impl RawToolsConfig {
             }
         }
 
-        let mut merged = Self::default();
-        // Load in reverse order so higher-priority candidates overwrite
-        // lower-priority ones
+        let mut loader = crate::cascade::CascadedConfigLoader::new();
+        // Load in reverse order so higher-priority candidates deep-merge over
+        // lower-priority ones without clobbering unrelated sibling keys.
         for path in candidates.into_iter().rev() {
             if path.is_file() {
                 let content = std::fs::read_to_string(&path)?;
-                let parsed = Self::parse_with_path(Some(&path), &content)?;
-                merged.tools.extend(parsed.tools);
-                merged.base_tools.extend(parsed.base_tools);
-                merged.categories.extend(parsed.categories);
+                let _ = Self::parse_with_path(Some(&path), &content)?;
+                loader.layer_str(Some(&path), &content)?;
             }
         }
-        Ok(merged)
+        loader.deserialize()
     }
 
     /// Loads and merges `tools.toml` configurations across all candidate
