@@ -8,9 +8,9 @@
 [![Ratatui](https://img.shields.io/badge/Ratatui-0.30-purple.svg)](https://ratatui.rs/)
 
 ### Sandboxed Meta-MCP Runtime and Declarative Fleet Engine
-Turn any CLI binary, script, or compiler into a sandboxed, schema-validated MCP tool with declarative TOML configurations.
+Turn any CLI binary, script, or compiler into a sandboxed, schema-validated MCP tool with declarative, 4-tier cascaded TOML configurations.
 
-Built in Safe Rust (`#![forbid(unsafe_code)]`) with Bubblewrap container isolation, sub-millisecond lifecycle hooks (<1ms, <500KB RSS), and an interactive Ratatui 0.30 terminal dashboard (`tkg`).
+Built in Pure Safe Rust (`#![forbid(unsafe_code)]`) with Linux Bubblewrap container isolation, universal cross-platform In-Band MCP Seatbelt containment, sub-millisecond `tkg-hooks` CLI startup (~0.71 ms cold start), and an interactive Ratatui 0.30 terminal dashboard (`tkg`).
 
 <p align="center">
   <img src="assets/demo.gif" alt="TorqKage Interactive Terminal Control Deck Demo" width="100%" />
@@ -39,33 +39,32 @@ Configuring tool access for autonomous coding agents usually involves an undesir
 
 | Problem | How TorqKage Addresses It |
 | :--- | :--- |
-| **Unrestricted shell execution:** Agents run arbitrary commands with host user privileges. | **Bubblewrap container sandboxing:** Tools declared with `enforce_sandbox = true` run in an isolated Bubblewrap container with private loopback networking and read-only host mounts. |
-| **Token overhead:** Long prompt descriptions and markdown guides consume context on every interaction. | **Native interceptors (<1ms, <500KB RSS):** Schema validation, argument checking, and output filtering happen in native code before reaching model context. |
-| **Lost session context:** Disconnected terminal sessions lose state, requiring manual restarts. | **Session resumption:** Session providers allow resuming prior sessions directly from `tkg` (`Enter` / `r`). |
-| **Working tree pollution:** Agent modifications clutter the primary working directory and editor buffers. | **Jujutsu workspace isolation:** Agents work in dedicated, sparse Jujutsu working copies (`.tkg/workspaces/<agent>`) without modifying the active working copy. |
-| **Failing command loops:** Agents repeat the same failing compiler or test command indefinitely. | **Circuit breaker:** Execution halts after consecutive command failures until reviewed or reset (`c`). |
+| **Unrestricted shell execution:** Agents run arbitrary commands with host user privileges. | **Two-layer containment:** Linux tools declaring `enforce_sandbox = true` (or granular `[tools.<name>.sandbox]` profiles) run in fail-closed Bubblewrap namespaces; macOS, Windows, and non-hook clients run under the **Universal In-Band MCP Seatbelt**. |
+| **Token overhead:** Long prompt descriptions and multi-kilobyte skills burn context on every interaction. | **Native engine + declarative filters:** Parameter validation, `[tools.<name>.output_filter]` pruning, MCP resources (`tkg://rules`, `tkg://status`), and prompts (`tkg-refactor`, `tkg-audit`) eliminate markdown skill bloat. |
+| **Lost session context:** Disconnected terminal sessions lose state across harness restarts. | **Unified `Harness` session resumption:** Discovers SQLite, JSONL, and JSON histories across Antigravity, Claude Code, OpenCode, Cursor, and custom runners directly from `tkg` (`Enter` / `r`). |
+| **Working tree pollution:** Agent modifications clutter the primary working directory and editor buffers. | **Jujutsu workspace isolation:** Agents work in dedicated, sparse Jujutsu working copies (`.tkg/workspaces/<agent>`) without modifying your active working copy. |
+| **Failing command loops:** Agents repeat the same failing compiler or test command indefinitely. | **Two-strike circuit breaker:** Halts mutating calls after consecutive failures (via `tkg-hooks` or in-band inside `tkg-mcp`) until reviewed or reset (`c` / `tkg -r`). |
 
 ---
 
 ## Quickstart
 
-### 1. Precompiled Binaries
-Install the engine and register the TorqKage plugin:
+### 1. Precompiled Binaries (`install.sh` POSIX `/bin/sh`)
+Install precompiled binaries (`tkg`, `tkg-mcp`, `tkg-hooks`) with `.sha256` checksum verification (supports Linux `x86_64`/`aarch64` `gnu`/`musl` and macOS):
 
-```bash
-curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/main/install.sh | bash
+```sh
+curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/main/install.sh | sh
 ```
 
-Select the target agent harness with `--harness` (default `agy`; also `opencode`, `claude`, or any custom name) and persist the same choice in `project.toml`:
+Select the target agent harness with `--harness` (`agy` default, `claude`, `opencode`, `cursor`, or a custom slug) and scaffold `~/.config/tkg/config.toml` non-interactively:
 
-```bash
-curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/main/install.sh | bash -s -- --harness claude
+```sh
+curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/main/install.sh | sh -s -- --harness claude --init-config
 ```
 
 ```toml
-# <project>/.tkg/project.toml
-[runner]
-harness = "claude"
+# ~/.config/tkg/config.toml (or <project>/.tkg/project.toml [runner])
+default_harness = "claude"
 ```
 
 ### 2. Install via Crates.io
@@ -76,20 +75,21 @@ cargo install torqkage tkg-mcp tkg-hooks
 ```
 
 ### 3. Build From Source
-To compile from source:
+Clone the repository and build from source (`--perf` for Fat-LTO stripped binaries, or `--fast` for Cranelift + Mold dev loops):
 
 ```bash
 git clone https://github.com/JeronimoCapelle/torqkage.git
 cd torqkage
-./install.sh --perf       # Production profile (LTO enabled, stripped)
+./install.sh --build-from-source --perf
 ```
-*(For faster local compilation with Cranelift and Mold, pass `--fast`.)*
 
 ### 4. Launch the Control Deck
-Run the interactive terminal dashboard:
+Run the interactive terminal dashboard (`-v`/`-vv`/`-vvv` enables structured `tracing` logs on `stderr`):
 
 ```bash
-tkg
+tkg            # Interactive Ratatui control deck
+tkg -a coder   # Select or launch an agent directly (flags work in any order)
+tkg -r         # Reset circuit breaker strike counter
 ```
 
 ---
@@ -125,12 +125,16 @@ Or run via the underlying harness directly:
 claude --agent coder      # or opencode --agent coder / agy --agent coder
 ```
 
-### 3. Build Acceleration
-Standard stable Rust is used by default. If your environment has Cranelift, Mold, or `sccache` installed, use the included helper script:
+### 3. Developer Workflows & Build Acceleration (`justfile`)
+The workspace [`justfile`](justfile) provides Cranelift + Mold dev loops, Fat-LTO production profiles, fixed-point Clippy auto-fixing, sanitizers, and full CI verification:
 
 ```bash
-./plugins/torqkage/bin/cargo-fast build
-./plugins/torqkage/bin/cargo-fast test
+just fast          # Cranelift + Mold compile check across workspace
+just ft            # Cranelift + Mold nextest test loop (`fast` profile)
+just perf          # Fat-LTO + target-cpu=native release build
+just min-size      # Stripped opt-level="z" minimal binary build (defaults to tkg-hooks)
+just fix           # Fixed-point auto-fix loop (rustc + clippy --fix <=5 passes + fmt + tests)
+just verify        # Full CI gate: fmt, clippy -D warnings, nextest, doctest, deny, machete, typos, docs
 ```
 
 ---
@@ -198,8 +202,8 @@ The reference fleet in `plugins/torqkage/` follows a Design Verification (DV) di
 
 Tools and agents can be added or modified without recompiling binaries:
 
-### 1. Adding a Tool in `tools.toml`
-Declare tools in [`plugins/torqkage/tools.toml`](plugins/torqkage/tools.toml) or `.tkg/tools.toml`:
+### 1. Adding a Tool in `tools.toml` (4-Tier Cascade)
+`TorqKage` deep-merges configuration across 4 tiers (`defaults` < `~/.config/tkg/` < `plugins/torqkage/` & `.tkg/` < CLI/env, supporting `merge_strategy = "replace" | "append" | "prepend" | "unique"`). Declare tools in [`plugins/torqkage/tools.toml`](plugins/torqkage/tools.toml) or `.tkg/tools.toml` with optional `[tools.<name>.sandbox]` profiles and `[tools.<name>.output_filter]` rules:
 
 ```toml
 [tools.my_scanner]
@@ -213,6 +217,15 @@ args = [
     { name = "target", required = false, flag = "--target", regex = "^[a-zA-Z0-9_-]+$", description = "Crate target name" },
     { name = "mode", required = false, default = "advisories", enum = ["advisories", "bans", "licenses"], description = "Audit check mode" }
 ]
+
+[tools.my_scanner.sandbox]
+engine = "bwrap"
+allow_network = false
+read_only_binds = ["{cwd}/Cargo.lock"]
+
+[tools.my_scanner.output_filter]
+keep_regex = ["error|warning|Vulnerability"]
+max_lines = 80
 ```
 
 ### 2. Defining an Agent
@@ -239,6 +252,51 @@ You are the specialized auditing agent for this repository.
 ```
 
 Saved agents appear in `tkg` with full gate enforcement.
+
+---
+
+---
+
+## Benchmarks
+
+Measured on **Linux `x86_64` (Intel Core i5-10300H @ 2.50 GHz)** against the workspace release builds and `tkg-common` benchmark suites ([`core_benches.rs`](crates/tkg-common/benches/core_benches.rs), [`gungraun_bench.rs`](crates/tkg-common/benches/gungraun_bench.rs)):
+
+### CLI & Hook Interception Latency (`hyperfine --warmup 10`)
+
+| Command | Workload | Mean ± σ | Min … Max | Peak RSS |
+| :--- | :--- | :--- | :--- | :--- |
+| `./target/release/tkg-hooks help` | Cold CLI spawn & dispatch (`-N`) | **709.3 ± 147.4 µs** | 574.5 … 2188.8 µs | 4.6 MiB |
+| `./target/release/tkg --status` | Cascaded config load + 10-agent matrix (`-N`) | **4.49 ± 0.39 ms** | 4.07 … 7.87 ms | 8.0 MiB |
+| `tkg-hooks pre-tool-use` | 6-stage `hooks.toml` gate pipeline + JSON dialect (via `sh`) | **12.16 ± 0.84 ms** | 11.27 … 15.75 ms | 7.2 MiB |
+| `tkg-hooks detect-wip` | Turn-by-turn VCS diff check spawning `jj`/`git` (via `sh`) | **14.97 ± 5.49 ms** | 11.76 … 40.71 ms | 40.7 MiB |
+
+### Core Hot-Path Microbenchmarks (`divan` + `gungraun` Callgrind)
+
+| Benchmark (`tkg_common`) | Median Wall (`divan`) | Mean Wall (`divan`) | Allocs (`divan`) | Instructions (`callgrind`) |
+| :--- | :--- | :--- | :--- | :--- |
+| `strip_delimited` | **1.78 µs** | 1.96 µs | 3 / 2.15 KB | 24,541 |
+| `strip_comments_rust` | **8.14 µs** | 8.58 µs | 11 / 1.91 KB | 104,791 |
+| `resolve_full_tools_toml` | **9.68 µs** | 11.33 µs | 51 / 35.73 KB | — |
+| `strip_tests_rust` | **12.14 µs** | 13.05 µs | 15 / 3.03 KB | 151,505 |
+| `frontmatter_parse_and_serialize` | **21.99 µs** | 25.92 µs | 246 / 75.53 KB | 180,892 *(parse)* |
+| `path_glob_and_security_guards` | **29.35 µs** | 32.93 µs | 228 / 20.89 KB | — |
+
+### Stripped Binary Sizes (`--profile min-size`)
+
+| Binary | `release` (unstripped) | `min-size` (stripped Fat LTO) | Architecture Scope |
+| :--- | :--- | :--- | :--- |
+| **`tkg`** | 7.7 MiB | **3.7 MiB** | Ratatui 0.30 TUI + SQLite session discovery |
+| **`tkg-hooks`** | 8.1 MiB | **4.0 MiB** | Lean lifecycle CLI (no Tokio, SQLite, or Ratatui) |
+| **`tkg-mcp`** | 12 MiB | **5.0 MiB** | Async Tokio stdio JSON-RPC 2.0 daemon |
+
+Reproduce locally:
+
+```bash
+cargo bench -p tkg-common --bench core_benches      # Divan latency & allocation profiler
+cargo bench -p tkg-common --bench gungraun_bench    # Callgrind instruction counts (Linux + Valgrind)
+```
+
+See the full breakdown in [Benchmarks & Latency Profiles](docs/src/benchmarks.md).
 
 ---
 

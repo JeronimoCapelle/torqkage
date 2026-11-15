@@ -1,30 +1,33 @@
 # Multi-Source Session Resumption
 
-`TorqKage` solves conversational state loss across terminal restarts by providing pluggable, multi-source session discovery.
+`TorqKage` solves conversational state loss across terminal restarts by delegating session discovery to the unified [`Harness`](../../ARCHITECTURE.md#81-the-4-crates--unified-harness-architecture) capability trait in `tkg-common`.
 
-## Pluggable `SessionProvider` Architecture
+## Unified `Harness::discover_sessions` Architecture
 
-Session discovery is abstracted behind the `SessionProvider` trait. Depending on the configured execution harness in `project.toml` (`[runner] harness = "..."`), `tkg` dynamically selects the appropriate backend:
+Depending on `[runner] harness` (or auto-detected workspace markers `.claude`, `.opencode`, `.gemini`, `.cursor/mcp.json`), `tkg` calls `harness.discover_sessions(agent_name, workspace_root)` against the matching backend:
 
-1. **`AntigravitySessionProvider` (`harness = "agy"`):**  
-   - Embedded `rusqlite` query against `~/.gemini/antigravity-cli/conversation_summaries.db`.
-   - CLI history correlation against `~/.gemini/antigravity-cli/history.jsonl` matching working directory (`$PWD`).
-   - FTS5 workspace catalog resolution.
-   - Physical database file verification in `~/.gemini/antigravity-cli/conversations/<id>.db`.
+1. **Google Antigravity (`harness = "agy"`):**
+   - Queries `~/.gemini/antigravity-cli/conversation_summaries.db` via optional `rusqlite` (`sqlite` feature enabled on `tkg-common` when built for `tkg-ctrl`, omitted in lean `tkg-hooks`).
+   - Correlates CLI history in `~/.gemini/antigravity-cli/history.jsonl` matching workspace path.
+   - Verifies local database files in `~/.gemini/antigravity-cli/conversations/<id>.db`.
 
-2. **`OpenCodeSessionProvider` (`harness = "opencode"`):**  
+2. **Claude Code (`harness = "claude"`):**
+   - Encodes the canonical workspace path into Claude's cross-platform project slug (normalizing path separators, `:`, `?`, and `\\?\` Windows verbatim prefixes).
+   - Scans JSONL transcripts in `~/.claude/projects/<encoded-slug>/*.jsonl` alongside fallback records in `.tkg/state/sessions/*.json`.
+
+3. **OpenCode (`harness = "opencode"`):**
    - Discovers workspace sessions in `.opencode/sessions/*.json` and `.opencode/*.json`.
    - Checks global user traces in `~/.local/share/opencode/sessions` and `~/.opencode/sessions`.
    - Extracts session ID, agent filter, message turn counts, and preview descriptions.
 
-3. **`GenericSessionProvider` (`harness = "claude"` or `"custom"`):**  
-   - Discovers state records in `.tkg/state/sessions/*.json`.
+4. **Cursor & Custom Harnesses (`harness = "cursor"` / `"custom"`):**
+   - Discovers Cursor transcripts (when present) and universal state records in `.tkg/state/sessions/*.json`.
 
 ## User Interface
 
-In `tkg`, when a prior session with steps is found:
+In `tkg`, when a prior session with recorded steps is found:
 ```text
 Resumable (conv: f1bb6355, 50 steps)
 [Enter/r: Resume]  [n: New Session]
 ```
-Pressing <kbd>Enter</kbd> or <kbd>r</kbd> invokes the configured harness resumption flag (e.g. `agy --conversation <id>` or `opencode --session <id>`), resuming immediately with full conversation history and context.
+Pressing <kbd>Enter</kbd> or <kbd>r</kbd> invokes the harness's configured resumption flag (for example `agy --conversation <id>`, `opencode --session <id>`, or `claude --resume <id>`), resuming immediately with full conversation history and context.

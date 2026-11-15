@@ -1,34 +1,48 @@
 # Declarative MCP Daemon (`tkg-mcp`)
 
-`tkg-mcp` is a persistent JSON-RPC 2.0 stdio server providing harness-agnostic, language-agnostic declarative tool execution for any MCP-compatible agent client (Claude Code, OpenCode, Cursor, Google Antigravity, or custom runners).
+`tkg-mcp` is a persistent JSON-RPC 2.0 stdio server providing harness-agnostic, language-agnostic declarative tool execution for any MCP-compatible agent client (Google Antigravity, Claude Code, OpenCode, Cursor, or custom runners).
 
-## Native Action Handlers
+## Native Action Handlers (`ToolAction`)
 
-Instead of shelling out to generic scripts, `tkg-mcp` compiles high-assurance native action handlers:
+Instead of shelling out to untrusted scripts, `tkg-mcp` compiles 14 bounded native action handlers:
 
 | Action | Description | Guards Enforced |
 | :--- | :--- | :--- |
 | `file_read` | Bounded file reader with line ranges and UTF-8 truncation | Path traversal, directory rejection |
-| `file_write` | Atomic atomic file creation and overwriting | Path policies, dangerous files |
-| `mpatch_edit` | Precision search-and-replace editor | Aider block rejection, scoped paths |
-| `static_command` | Pre-configured shell command with zero arguments | Bubblewrap container isolation |
-| `parameterized_command` | Command with strictly validated regex arguments | Shell metacharacter injection blocking |
+| `file_write` | Atomic file creation and overwriting | Path policies, dangerous files, manifest guard |
+| `mpatch_edit` | Precision search-and-replace editor | Fuzzy block validation, scoped paths, manifest guard |
+| `file_search` | Scoped in-process regex search (`ignore` + `grep-searcher`) | Workspace confinement, dangerous files |
+| `static_command` | Pre-configured command with zero dynamic arguments | Bubblewrap jail / process-group timeout |
+| `parameterized_command` | Command with strictly validated typed/regex/enum arguments | Shell metacharacter blocking, sandbox profile |
 | `cli_manual` | Ground-truth dynamic tool parameter inspector | In-memory schema reflection |
-| `project_state` | Summarizes git/jj status and repository specs | Read-only |
-| `workspace_ensure` | Ensures isolated Jujutsu subagent workspace | Jujutsu repository boundary |
+| `project_state` | Summarizes git/jj status, specs, and handoff state | Read-only |
+| `workspace_ensure` | Provisions isolated Jujutsu subagent workspace | Jujutsu repository boundary |
+| `workspace_inspect` | Inspects diffs inside a subagent sparse workspace | Read-only |
+| `workspace_merge` | Merges validated subagent workspace changes back into trunk | Declarative quality gates + rollback |
+| `set_active_agent` | Switches active agent persona in `.tkg/state/active_agent.json` | Agent perimeter scoping |
+| `record_session_handoff` | Writes structured session handoff metadata | Workspace state boundary |
+| `detect_wip` | Reports dirty working copy status | Read-only |
 
-## Dynamic Agent Scoping
+## MCP Resources & Prompts
 
-`tkg-mcp` dynamically discovers the calling agent via `.tkg/state/active_agent` and evaluates its permissions against the `mcp_tools:` frontmatter defined in `plugins/torqkage/agents/<name>.md`. If an unconfigured or unauthorized agent calls a tool, the daemon rejects execution with an explicit policy violation error.
+Alongside `tools/list` and `tools/call`, `tkg-mcp` natively exposes MCP Resources and Prompts:
 
----
+- **`resources/list` & `resources/read`:**
+  - `tkg://rules`: Active agent directives, permitted directories, manifest protections, and content filters.
+  - `tkg://status`: Live telemetry JSON including `detected_harness`, `in_band_seatbelt`, active circuit-breaker state, and workspace status.
+- **`prompts/list` & `prompts/get`:**
+  - `tkg-refactor`: Guided refactoring workflow referencing `tkg://rules` and caller inspection.
+  - `tkg-audit`: Verification and state inspection workflow referencing `tkg://status` and `tkg://rules`.
 
-## The Meta-MCP Pattern vs. Traditional MCP Servers
+## Caller Identification, Universal In-Band Seatbelt & Output Filtering
 
-In the standard MCP ecosystem, every new tool requires writing, compiling, and running a bespoke Node.js or Python process. `TorqKage` replaces this sprawl with a single, high-performance Safe Rust daemon (`tkg-mcp`). By declaring tools in `tools.toml`, developers gain instant access to:
-- **Automatic JSON Schema Synthesis:** Generates strict type schemas from TOML declarations.
-- **Regex Argument Validation:** Intercepts shell injections before any subprocess is spawned.
-- **Bubblewrap Container Isolation:** Runs untrusted commands inside private namespaces (`CLONE_NEWNET`, private loopback only, zero outbound sockets).
-- **UTF-8 Output Truncation:** Caps large command outputs (`truncate_lines`) to protect the model's context window.
+- **Dynamic Caller Identification:** `tkg-mcp` identifies the calling harness from MCP `initialize.params.clientInfo.name`, `TKG_HARNESS`, or Linux `/proc/<ppid>/cmdline` fallback.
+- **Automatic In-Band Seatbelt:** When `Harness::supports_hooks()` is `false` (for example Cursor, non-hook MCP clients, or platforms without hook wiring), `tkg-mcp` enables `in_band_seatbelt = true`—tracking compiler/test failure signatures automatically across Rust, Python, and Go commands and halting mutating calls once the circuit breaker trips.
+- **Declarative Output Filter (`[tools.<name>.output_filter]`):** Applies `keep_regex`, `drop_regex`, and `max_lines` before line/byte truncation to prune noisy compiler or runner output before it consumes context tokens.
+
+## Dynamic Agent Scoping & Tracing
+
+- `tkg-mcp` discovers the active agent via `--agent`, harness environment variables, or `.tkg/state/active_agent` and evaluates calls against `mcp_tools:` frontmatter. Unauthorized tool calls are rejected with an explicit policy error.
+- Startup and request diagnostics go cleanly to `stderr` via `tracing` (`-v` / `-vv` / `-vvv` or `RUST_LOG`), keeping `stdout` strictly valid JSON-RPC 2.0.
 
 

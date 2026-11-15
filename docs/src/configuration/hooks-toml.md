@@ -1,6 +1,6 @@
 # Hooks Configuration (`hooks.toml`)
 
-The `hooks.toml` configuration file defines the lifecycle execution pipeline, guard sentries, and context injection rules for `tkg-hooks`. The `tkg-hooks` engine evaluates native high-assurance Rust safety primitives in-memory (<1ms latency) alongside declarative custom shell assertions, completely decoupling safety policies from compiled code.
+The `hooks.toml` configuration file defines the lifecycle execution pipeline, guard sentries, and context injection rules for `tkg-hooks`. The `tkg-hooks` engine evaluates native high-assurance Rust safety primitives in-memory (sub-millisecond cold CLI startup) alongside declarative custom shell assertions, failing closed with `line:col` caret diagnostics if any discovered `hooks.toml` is malformed.
 
 ---
 

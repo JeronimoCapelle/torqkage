@@ -54,21 +54,24 @@ description = "Fast syntax, type, and borrow check across all workspace crates"
 
 ### 2. Execution Actions (`action`)
 
-The `action` field selects the underlying execution engine powering the tool. There are 11 distinct action variants:
+The `action` field selects the underlying execution engine powering the tool (`14` built-in variants):
 
 | Action Variant | Description & Capabilities | Required Parameters / Arguments |
 | :--- | :--- | :--- |
-| `file_read` | Bounded file reading with automatic line/byte truncation, utf-8 validation, and truncation notices. Bounded to workspace. | `path` (String), `start_line` (optional Int), `end_line` (optional Int) |
-| `file_write` | Atomic file writer with parent directory auto-creation, strict workspace boundary enforcement, and dangerous path protection. | `path` (String), `content` (String), `overwrite` (optional Bool) |
-| `mpatch_edit` | High-precision fuzzy search-and-replace block patcher powered by the mpatch engine. Verifies surrounding context before replacement. | `path` (String), `target` (String), `replacement` (String) |
-| `file_search` | Scoped grep/ripgrep pattern search across repository source files or configured project documentation paths. | `query` (String), `paths` (optional Array) |
+| `file_read` | Bounded file reading with line slicing, UTF-8 validation, and truncation notices. Bounded to workspace. | `path` (String), `start_line` (optional Int), `end_line` (optional Int) |
+| `file_write` | Atomic file writer with parent directory auto-creation, workspace boundary enforcement, and dangerous path protection. | `path` (String), `content` (String), `overwrite` (optional Bool) |
+| `mpatch_edit` | High-precision fuzzy search-and-replace block patcher powered by `mpatch`. Verifies surrounding context before replacement. | `path` (String), `target` (String), `replacement` (String) |
+| `file_search` | Scoped in-process regex/substring search across repository files or configured project documentation paths. | `query` (String), `paths` (optional Array) |
 | `static_command` | Executes a fixed command-line invocation without dynamic user-supplied arguments. Safe against shell injection. | `command` (Array of Strings) |
 | `parameterized_command` | Dynamic CLI tool execution where user arguments are mapped to flags and validated against strict regular expressions. | `command` (Array of Strings), `args` (Array of `ToolArg`) |
-| `cli_manual` | Formats and renders man-page style help text for CLI utilities and engine tools. | Built-in |
+| `cli_manual` | Renders man-page, `--help`, `tldr`, and compiler explanation help text. | `tool` / `query` (optional String) |
 | `project_state` | Synthesizes active VCS revision, dirty file status, Jujutsu working copy commit, and quality gate health into an executive summary. | Built-in |
 | `workspace_ensure` | Provisions, switches to, or validates an isolated Jujutsu sparse workspace for a subagent (`.tkg/workspaces/<agent>/`). | `agent` (String) |
 | `workspace_inspect` | Inspects working copy diffs and file modifications between subagent sparse workspaces and the main working tree. | `agent` (String) |
 | `workspace_merge` | Absorbs or merges changes from an isolated subagent workspace back into the active working copy. | `agent` (String) |
+| `set_active_agent` | Switches active agent persona in `.tkg/state/active_agent.json` for dynamic permission scoping. | `agent` (String) |
+| `record_session_handoff` | Writes structured session handoff metadata into `.tkg/state/`. | Built-in / metadata |
+| `detect_wip` | Inspects and summarizes uncommitted VCS working-copy modifications. | Built-in |
 
 ---
 
@@ -119,8 +122,9 @@ args = [
 
 | Setting | Type | Default | Description & Valid Variants |
 | :--- | :--- | :--- | :--- |
-| `enforce_sandbox` | Boolean | `false` | When `true`, the process is jailed inside a Bubblewrap container with a read-only root mount and isolated temporary directories.<br>Alias: `sandbox`. |
-| `allow_host_fallback` | Boolean | `false` | Only meaningful with `enforce_sandbox = true`. By default a sandboxed tool **fails closed** if `bwrap` is missing or cannot create namespaces. Set to `true` to let the tool run directly on the host in that case, but only when an outer sandbox/container is detected (e.g. Docker). Use it only if the outer environment already confines the tool. |
+| `enforce_sandbox` | Boolean | `false` | When `true`, the process is jailed inside a Bubblewrap container with a read-only root mount and isolated temporary directories.<br>Alias: `sandbox = true/false`, or granular `[tools.<name>.sandbox]` table. |
+| `sandbox` | Bool or Table | `false` | Accepts `true`/`false` or a granular `[tools.<name>.sandbox]` table configuring `engine` (`"bwrap"` or `"none"`), `allow_network`, `unshare_pid`, `read_only_binds`, `writable_binds`, and `env_passthrough` (supporting `{cwd}` and `{home}` placeholders). |
+| `allow_host_fallback` | Boolean | `false` | Only meaningful with `enforce_sandbox = true`. By default a sandboxed tool **fails closed** if `bwrap` is missing or cannot create namespaces. Set to `true` to let the tool run directly on the host in that case, but only when an outer sandbox/container is detected (e.g. Docker). |
 | `enforce_workspace_bounds` | Boolean | `true` | Prevents path traversal vulnerabilities (`../`) and rejects any file paths resolving outside the workspace root. |
 | `ban_dangerous_files` | Boolean | `true` | Prevents the tool from reading, writing, or inspecting sensitive files (SSH keys, credentials, `.git/`, `.jj/`, shell rc files). |
 | `allowed_directories` | Array of strings | `[]` | Explicit directory whitelist. If non-empty, file operations are restricted strictly to these relative directories. |
@@ -130,15 +134,16 @@ args = [
 
 ---
 
-### 6. Output Capture & Truncation
+### 6. Output Capture, Filtering & Truncation
 
 | Setting | Type | Default | Description & Valid Variants |
 | :--- | :--- | :--- | :--- |
 | `output_capture` | String enum | `"stdout"` | Process streams captured and returned to the LLM:<br>• `stdout`: Captures standard output only.<br>• `stderr`: Captures standard error only.<br>• `both`: Interleaves combined stdout and stderr.<br>• `exit_code_only`: Returns `"Success (exit code 0)"` without token output.<br>• `json_spans`: Filters compiler JSON diagnostic streams to actionable error spans. |
+| `output_filter` | Table | `None` | Declarative line pruning applied before truncation via `[tools.<name>.output_filter]`:<br>• `keep_regex`: Retain only matching lines (unless empty).<br>• `drop_regex`: Drop matching noisy lines.<br>• `max_lines`: Cap retained lines before truncation notices. Supports field-level inheritance from categories and `base_tools`. |
 | `truncate_lines` | Integer (usize) | `None` | Maximum number of output lines returned before truncating. |
 | `truncate_bytes` | Integer (usize) | `None` | Maximum byte length of output returned before truncating. |
 | `emit_truncation_notice` | Boolean | `true` | Appends `"[Output truncated: ... lines omitted]"` when output limits are reached. |
-| `timeout_seconds` | Integer (u64) | `15` | Maximum execution duration before terminating the child process with `SIGKILL`. |
+| `timeout_seconds` | Integer (u64) | `15` | Maximum execution duration before staged `SIGTERM` -> grace -> `SIGKILL` `-pgid` teardown. |
 
 ---
 
@@ -211,11 +216,13 @@ empty_fallback = "Verification passed: 0 errors, 0 warnings."
 
 ---
 
-## Discovery & Precedence
+## Discovery & 4-Tier Cascaded Precedence
 
-The `tkg-mcp` daemon and `tkg-hooks` engine discover `tools.toml` across the following locations:
+The `tkg-mcp` daemon and `tkg-hooks` engine cascade and deep-merge `tools.toml` (instead of dropping global tables when a local override exists) via `tkg_common::cascade` (`merge_strategy = "replace" | "append" | "prepend" | "unique"`):
 
-1. `<workspace>/.tkg/tools.toml` *(Workspace-local custom override)*
-2. `<workspace>/tools.toml` *(Per-repository project overrides)*
-3. `<workspace>/plugins/torqkage/tools.toml` *(In-tree plugin bundle default)*
-4. `~/.gemini/config/plugins/torqkage/tools.toml` *(Global user configuration)*
+1. Global / installed plugin bundle (`~/.config/tkg/tools.toml` and `<plugin_install_dir>/tools.toml`)
+2. `<workspace>/plugins/torqkage/tools.toml` *(In-tree plugin bundle default)*
+3. `<workspace>/tools.toml` *(Per-repository project overrides)*
+4. `<workspace>/.tkg/tools.toml` *(Highest precedence workspace-local override)*
+
+Syntax errors in any discovered file fail closed with `line:col` caret diagnostics (`TkgError::ConfigParse`).

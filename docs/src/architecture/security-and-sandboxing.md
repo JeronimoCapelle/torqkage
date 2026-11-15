@@ -32,7 +32,7 @@ In the flight control deck, operators choose whether to isolate the launched age
 
 ### Tier 2: Granular Tool-Level Sandboxing (`tools.toml`)
 
-Individual tools declared in `tools.toml` can independently enforce container execution:
+Individual tools declared in `tools.toml` can independently enforce container execution via either a simple boolean (`enforce_sandbox = true` or `sandbox = true`) or a granular `[tools.<name>.sandbox]` profile (`SandboxProfile`, inherited across categories and `base_tools`):
 
 ```toml
 [tools.disassemble_symbol]
@@ -41,14 +41,24 @@ command = ["llvm-objdump", "-d"]
 enforce_sandbox = true      # Wraps THIS specific tool in a Bubblewrap jail
 output_capture = "stdout"
 
+[tools.disassemble_symbol.sandbox]
+engine = "bwrap"            # "bwrap" (default) or "none"
+allow_network = false       # Keep network namespace unshared (loopback only)
+unshare_pid = true          # Isolate child PIDs (--unshare-pid)
+read_only_binds = ["/usr/share/doc"]
+writable_binds = ["{cwd}/target"]
+env_passthrough = ["RUST_LOG"]
+
 [tools.cargo_check]
 action = "static_command"
 command = ["cargo", "check"]
 enforce_sandbox = false     # Runs directly on host (reusing cargo caches)
 ```
 
-- If `enforce_sandbox = true` (or `sandbox = true`), `tkg-mcp` dynamically wraps the invocation in `bwrap` via `tkg_common::sandbox::build_bubblewrap_command`.
-- If `enforce_sandbox = false` (the default for most tools), the tool executes as a standard host process through `SubprocessSupervisor` with process group isolation and strict timeouts.
+- If `enforce_sandbox = true` (or `[tools.<name>.sandbox]` with `engine = "bwrap"`), `tkg-mcp` wraps the invocation in `bwrap` via `tkg_common::sandbox::build_bubblewrap_command_with_profile`. `{cwd}` and `{home}` tokens in bind paths expand dynamically at execution time.
+- **Fail-Closed Guarantee:** By default (`allow_host_fallback = false`), if `enforce_sandbox = true` is configured and `bwrap` is unavailable (for example, missing on macOS/Windows or blocked in an outer container), execution **fails closed** rather than silently dropping isolation. Only tools that explicitly set `allow_host_fallback = true` may fall back to host execution—and only when an outer sandbox is verified or running with user-acknowledged fallback.
+- On **macOS and Windows**, or with harnesses that do not support external lifecycle hooks (`Harness::supports_hooks() == false`), `tkg-mcp` automatically activates the **Universal In-Band MCP Seatbelt**: workspace confinement, dangerous-file protection, manifest mutation guards, schema regex validation, and automatic circuit-breaker tracking run directly inside `tkg-mcp` even without Linux `bwrap`.
+- If `enforce_sandbox = false` (or `engine = "none"`), the tool executes as a standard host process through `SubprocessSupervisor::run_supervised` with process-group isolation, non-blocking Unix `O_NONBLOCK` + `nix::poll` pipe draining, staged `SIGTERM` -> grace -> `SIGKILL` `-pgid` teardown, and bounded post-exit drain so detached `setsid` grandchildren cannot hang pipes.
 
 ### Tier 3: Agent Persona Policies (`AGENT.md`)
 
@@ -96,16 +106,17 @@ When container sandboxing is active (either via session toggle or tool declarati
 
 ---
 
-## 3. Transparent Nested Container Detection
+## 3. Hardened Outer Container Detection
 
-To prevent container-in-container crashes when running inside Docker, Podman, Kubernetes, or GitHub Actions CI runners, `tkg_common::sandbox::is_inside_outer_sandbox()` dynamically inspects:
+To decide whether nested namespace creation (`bwrap`) can run or whether a tool with `allow_host_fallback = true` is already inside an outer container runtime, `tkg_common::sandbox::is_inside_container()` checks strict runtime signals rather than loose substring heuristics:
 
-1. Environment flags: `TKG_OUTER_SANDBOX=1` (or harness-specific outer-sandbox variables such as `AGY_OUTER_SANDBOX=1`).
+1. Explicit environment variables: `TKG_OUTER_SANDBOX` or harness-advertised `Harness::outer_sandbox_env_vars()` (e.g. `AGY_OUTER_SANDBOX`). Generic `SANDBOX` / `CONTAINER` variables are intentionally ignored.
 2. Container filesystem indicators: `/.dockerenv` or `/run/.containerenv`.
-3. Control group paths: `/proc/1/cgroup` containing `docker`, `containerd`, or `kubepods`.
-4. Nested PID namespaces: Process namespaces with multiple entries in `/proc/self/status` (`NSpid`).
+3. Runtime control-group segments: `/proc/1/cgroup` and `/proc/self/cgroup` inspected segment-by-segment for recognized container runtimes (`docker`, `containerd`, `kubepods`, `podman`, `lxc`, `libpod`).
+4. Container storage mounts: `/proc/self/mountinfo` checked for concrete runtime mount markers (`docker/overlay2`, `containers/storage`, `containerd/`, `libpod/`, `lxcfs`, `/run/host/container-manager`).
+5. Nested PID namespaces & init processes: multiple entries on `NSpid:` in `/proc/self/status`, or container init comms (`tini`, `dumb-init`, `*bwrap*`).
 
-When existing containerization is detected, `TorqKage` **gracefully bypasses inner `bwrap` calls**, avoiding `EPERM` namespace creation failures while retaining application-level path confinement and permission gates.
+When a tool declares `enforce_sandbox = true` inside an environment where `bwrap` cannot run, `TorqKage` **fails closed** unless `allow_host_fallback = true` is explicitly permitted, preserving application-level Seatbelt enforcement in all cases.
 
 ---
 

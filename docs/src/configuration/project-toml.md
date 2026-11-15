@@ -208,7 +208,7 @@ filter = "comments_only"
 
 ```toml
 [runner]
-harness = "opencode"             # "agy" (default), "opencode", "claude", or "custom"
+harness = "opencode"             # "agy" (default), "opencode", "claude", "cursor", or "custom"
 command = ["opencode"]           # Optional command override or template
 agent_flag = "--agent"           # Flag used to dispatch to an agent persona
 sandbox_flag = "--sandbox"       # Optional sandbox flag passed to harness
@@ -217,11 +217,11 @@ extra_args = ["--verbose"]       # Additional CLI arguments passed on launch
 agent_dirs = ["agents", ".opencode/agents"] # Optional explicit agent discovery search paths
 ```
 
-The harness is chosen by `[runner] harness` in `project.toml` and, at install time, by `./install.sh --harness <name>` (which selects the global bundle location and records the choice in the installed `project.toml`). Unknown names are treated as custom harnesses and use convention-based paths (`.<name>/agents`, `~/.<name>/plugins/torqkage`) with the harness name as the default binary. All configuration discovery (`tools.toml`, `hooks.toml`, plugin directories) is centralized in `tkg_common::harness`.
+The harness is chosen by `[runner] harness` (or top-level shorthand `default_harness` in `~/.config/tkg/config.toml`), auto-detected from workspace markers (`.claude`, `.opencode`, `.gemini`, `.cursor/mcp.json`), and set at install time via `./install.sh --harness <name>`. Unknown names are treated as custom harnesses and use convention-based paths (`.<name>/agents`, `~/.<name>/plugins/torqkage`) with the harness name as the default binary. All harness capabilities, wire dialects, session lookup, and config injection live in `tkg_common::harness`.
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `harness` | String | `"agy"` | Execution platform: `"agy"`, `"opencode"`, `"claude"`, or `"custom"`. Determines the default binary name and session discovery backend. |
+| `harness` | String | `"agy"` | Execution platform: `"agy"`, `"opencode"`, `"claude"`, `"cursor"`, or `"custom"`. Determines the default binary name, hook dialect, and session discovery backend. |
 | `command` | Array of strings or String | Auto-inferred | Optional explicit command. If array elements contain `{agent}` or `{session}`, they are replaced with the target agent and conversation ID. |
 | `agent_flag` | String | Auto-inferred (`"--agent"`) | CLI flag used to specify the agent persona. |
 | `sandbox_flag` | String | `"--sandbox"` (for `agy`), `None` (for others) | Optional CLI flag to pass when Bubblewrap sandboxing is toggled. |
@@ -260,12 +260,13 @@ Ready-to-use production configuration templates are located in `docs/templates/`
 
 ---
 
-## Discovery & Precedence
+## Discovery & 4-Tier Cascaded Precedence
 
-`project.toml` is resolved in the following priority order:
+`ProjectConfig` (`tkg_common::cascade::CascadedConfigLoader`) deep-merges configuration across four tiers (lowest to highest priority; tables merge recursively and arrays support `merge_strategy = "replace" | "append" | "prepend" | "unique"`):
 
-1. `<workspace>/.tkg/project.toml` *(Workspace-local override)*
-2. `<workspace>/project.toml` *(Repository root configuration)*
-3. `<workspace>/plugins/torqkage/project.toml` *(In-tree plugin default)*
-4. `~/.gemini/config/plugins/torqkage/project.toml` *(Global installed plugin fallback)*
-5. Dynamic synthesis via ecosystem auto-detection.
+1. Built-in workspace defaults & ecosystem auto-detection (`Cargo.toml`, `build.zig`, `go.mod`, `pyproject.toml`, `package.json`, `meson.build`, `CMakeLists.txt`).
+2. User-global config: `~/.config/tkg/config.toml` (supports top-level `default_harness`), `~/.config/tkg/project.toml`, `~/.tkg/project.toml`, and installed plugin defaults.
+3. Workspace-local config: `<workspace>/plugins/torqkage/project.toml`, `<workspace>/project.toml`, `<workspace>/.tkg/project.toml`, `<workspace>/.tkg/config.toml`.
+4. Runtime environment variables & CLI overrides.
+
+Any malformed discovered config fails closed with line-numbered caret diagnostics (`TkgError::ConfigParse`).

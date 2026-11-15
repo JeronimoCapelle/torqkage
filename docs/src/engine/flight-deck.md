@@ -9,8 +9,15 @@
 - **Right Panel:** Capability matrix displaying agent description, permission mode, command policy, session resumption telemetry, and a toggleable checklist of MCP tools. Pressing <kbd>Space</kbd> toggles a tool between `ALLOW` (autonomous) and `ASK` (requires operator confirmation).
 
 ### Tab 2: MCP Tool Catalog
-- Displays all declared tools in `tools.toml`.
-- Shows command templates, category badges, execution policies, and timeout bounds.
+- Dynamically groups tools using the `category` labels declared in `tools.toml` (falling back to `"Tools"` when unset—no hardcoded language-specific category enums).
+- Shows command templates, category badges, sandbox policies, execution policies, and timeout bounds.
+
+### CLI Shortcuts & Order-Independent Flags
+
+`tkg` accepts flags in any order alongside the interactive TUI:
+- `tkg -a <agent>` / `tkg --agent <agent>`: Select or launch `<agent>` directly.
+- `tkg -r` / `tkg --reset-breaker` (or `tkg reset-breaker`): Clear the circuit breaker counter directly from the CLI.
+- `tkg status`, `tkg validate`, `tkg workspace <ensure|forget> <agent>`, `-v`/`-vv`/`-vvv` (`stderr` tracing verbosity).
 
 ## Pre-Launch Gatekeeper
 

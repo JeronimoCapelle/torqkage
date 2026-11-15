@@ -1,6 +1,13 @@
 # Lifecycle Interceptors (`tkg-hooks`)
 
-`tkg-hooks` is an ultra-fast (<1ms startup, <500KB RSS) command-line interceptor executed on agent harness lifecycle events (`PreToolUse`, `PreInvocation`, `SessionStart`, `Stop`).
+`tkg-hooks` is a featherweight native lifecycle interceptor compiled intentionally without `tokio`, `rusqlite`, `ratatui`, or `tracing-subscriber` so hook invocations stay compact and fast on `PreToolUse`, `PreInvocation`, `SessionStart`, and `Stop`.
+
+## Harness Dialect Auto-Detection
+
+`tkg-hooks` supports multiple harness wire protocols transparently via `tkg_common::hook_dialect`:
+- **ProtoJSON (`agy`, `opencode`, custom):** Standard TorqKage / Antigravity JSON hook envelopes.
+- **Claude Code (`claude`):** Auto-detects Claude payloads (`hook_event_name` / `tool_name`), normalizes `session_id` and `transcript_path`, and emits Claude `hookEventName` / `permissionDecision` / `permissionDecisionReason` outputs (`exit 2` on Deny, `exit 0` on Ask).
+- Structured diagnostics go to `stderr` via `-v` / `-vv` / `-vvv` or `RUST_LOG`, leaving `stdout` strictly clean for hook wire payloads.
 
 ## Intercepted Events
 

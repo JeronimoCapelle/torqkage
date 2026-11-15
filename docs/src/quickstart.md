@@ -4,25 +4,27 @@ Get started with `TorqKage` in under 60 seconds.
 
 ## Prerequisites
 
-- **Linux** (x86_64 or aarch64) — `bubblewrap` (`bwrap`) is optional, needed if container sandboxing is enabled.
-- **Rust Toolchain:** Rust 1.85+ (Nightly or Rust 2024 Edition) when building from source.
-- **Agent Execution Harness:** Any supported CLI harness installed on `$PATH` (Claude Code `claude`, OpenCode `opencode`, Google Antigravity `agy`, or a custom CLI runner).
-- *(Optional for fast compilation):* `mold` linker and `rustc-codegen-cranelift`.
+- **Operating System:**
+  - **Linux** (`x86_64` or `aarch64`, glibc or musl): optional `bubblewrap` (`bwrap`) enables OS container sandboxing.
+  - **macOS / Windows:** Cross-platform CI-tested binaries run with **In-Band MCP Seatbelt** containment when `bwrap` is unavailable.
+- **Rust Toolchain:** Rust 1.85+ (Rust 2024 Edition) when building from source.
+- **Agent Execution Harness:** Any supported CLI harness installed on `$PATH` (Google Antigravity `agy`, Claude Code `claude`, OpenCode `opencode`, Cursor `cursor`, or a custom CLI runner).
+- *(Optional for fast compilation & recipes):* `just`, `clang` / `mold`, `rustc-codegen-cranelift`.
 
 ## Installation
 
-### Method 1: Automated Installer (One-Liner)
+### Method 1: Automated POSIX Installer (One-Liner)
 
-Runs standalone without requiring you to clone the repository or install the Rust toolchain (fetches precompiled native binaries for your target architecture):
+Works cleanly via `/bin/sh` on Linux (`x86_64`/`aarch64`, `gnu`/`musl`) and macOS (`Darwin`). Downloads precompiled release archives with `.sha256` checksum verification (falling back cleanly to Cargo source builds when needed) and scaffolds `~/.config/tkg/config.toml`:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/main/install.sh | sh
 ```
 
-Pass `--harness <name>` (e.g., `claude`, `opencode`, `agy`, or a custom slug) to target a specific harness:
+Pass `--harness <name>` (e.g., `agy`, `claude`, `opencode`, `cursor`, or a custom slug) and `--init-config` (non-interactive config scaffold):
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/main/install.sh | bash -s -- --harness claude
+curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/main/install.sh | sh -s -- --harness claude --init-config
 ```
 
 ### Method 2: From Crates.io
@@ -33,21 +35,30 @@ Install the `tkg`, `tkg-mcp`, and `tkg-hooks` binaries directly from crates.io:
 cargo install torqkage tkg-mcp tkg-hooks
 ```
 
-### Method 3: From Source
+### Method 3: Build From Source
 
-Clone the repository and compile using the high-performance `perf` profile (or `--fast` with Cranelift and Mold for development):
+Clone the repository and compile from source using `--build-from-source` (`--perf` for LTO release or `--fast` for Cranelift + Mold):
 
 ```bash
 git clone https://github.com/JeronimoCapelle/torqkage.git
 cd torqkage
-./install.sh --perf
+./install.sh --build-from-source --perf
 ```
 
 The installer will:
-1. Compile `tkg`, `tkg-mcp`, and `tkg-hooks`.
-2. Bundle them into the configured harness plugin directory (e.g., `~/.claude/plugins/torqkage`, `~/.local/share/opencode/plugins/torqkage`, or `~/.gemini/config/plugins/torqkage`).
-3. Create symlinks in `~/.local/bin/`.
+1. Download or compile `tkg`, `tkg-mcp`, and `tkg-hooks`.
+2. Install binaries into `~/.local/bin/` and sync the harness bundle directory (for example `~/.gemini/config/plugins/torqkage`, `~/.claude/plugins/torqkage`, `~/.local/share/opencode/plugins/torqkage`, or `~/.cursor/plugins/torqkage`).
+3. Scaffold `~/.config/tkg/config.toml` (when `--init-config` / interactive confirmation is chosen).
 4. Run harness bundle validation when supported.
+
+Or drive development tasks directly with `just`:
+
+```bash
+just fast          # Cranelift + Mold quick compile check
+just ft            # Cranelift + Mold nextest test loop
+just fix           # Fixed-point auto-fix loop (rustc + clippy --fix + fmt + tests)
+just verify        # Full CI quality gate locally (fmt, clippy, nextest, doc, deny, machete, typos)
+```
 
 ## Running the Flight Deck
 

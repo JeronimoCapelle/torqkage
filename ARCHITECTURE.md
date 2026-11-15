@@ -1,6 +1,6 @@
 # TorqKage: System Architecture & Invariant Manual
 
-**Document Version:** 1.0.0  
+**Document Version:** 1.1.0  
 **Status:** Canonical & Permanent Architecture Specification  
 **Authority:** Root repository manual for human developers and autonomous AI agents (`coder`, `planner`, `spec-checker`, `finisher`, `copilot`).
 
@@ -18,21 +18,22 @@ All autonomous agents and human contributors operating within this repository or
    - Modifying dependencies or build configurations without human review is prohibited to prevent dependency bloat, accidental malicious package injection, and proc-macro execution vectors.
    - If a new dependency is required, the agent must ask the operator for permission with the package name, requested version, and justification before modifying manifests.
 2. **Compiler & Linter Cleanliness:**
-   - The codebase compiles under `#![deny(clippy::all)]` and `#![deny(clippy::pedantic)]`.
-   - **Zero compiler warnings and zero clippy warnings** are tolerated across all workspace targets (`--all-targets`).
-   - Every `#[allow(...)]` attribute requires an explicit `reason = "..."` explanation. Blanket crate-level lint suppressions are prohibited.
+   - The workspace enforces `#![forbid(unsafe_code)]`, `#![deny(clippy::correctness, clippy::suspicious, clippy::unwrap_used)]` (with `.clippy.toml` test exemptions cleanly isolated to tests), and curated high-signal pedantic/nursery rules in `Cargo.toml`.
+   - **Zero compiler, clippy, or rustdoc warnings** (`RUSTDOCFLAGS="-D warnings"`) across `--workspace --all-targets --all-features`.
+   - `allow_attributes_without_reason = "deny"`: every `#[allow(...)]` attribute requires an explicit `reason = "..."`.
 3. **Robust Error Handling:**
-   - **Zero unhandled `unwrap()` or `expect()` calls** in production code. All errors must use typed enumerations (`thiserror`) or return descriptive `Result<T, String>` / `Result<T, TkgError>`.
+   - **Zero unhandled `unwrap()` or `expect()` calls** in production code. Errors use typed enumerations (`thiserror`, `TkgError::from_toml` with `line:col` caret snippets) or explicit propagation; configuration loading always fails closed on syntax/parse errors.
+   - Zero silent `drop(...)` suppression of fallible I/O or VCS mutations in production paths.
 4. **Subprocess Supervision & Hang Immunity:**
    - **Never** invoke raw synchronous `Command::new(...).output()` without timeout bounding.
-   - All external processes must execute through `SubprocessSupervisor::run_supervised` with bounded deadlines (`tkg-common::limits`) to prevent daemon or IDE freezes on lock contention or hanging processes.
-5. **Pure Safe Rust & Process Group Safety:**
-   - The entire codebase compiles with `#![forbid(unsafe_code)]`. Zero raw `libc` pointers or `unsafe` blocks are permitted.
-   - Process tree containment and group signals are managed through safe process group abstractions (`command-group` and safe signal delivery), guaranteeing elimination of orphaned compiler tasks when parent processes exit.
+   - All external processes execute through `SubprocessSupervisor::run_supervised` with bounded deadlines (`tkg_common::limits`), Unix `O_NONBLOCK` + `nix::poll` non-blocking pipe draining, staged `SIGTERM` -> grace -> `SIGKILL` `-pgid` process-group teardown, and bounded post-exit drain against detached grandchildren.
+5. **Pure Safe Rust & Structured Tracing:**
+   - The entire workspace enforces `#![forbid(unsafe_code)]` with zero raw FFI blocks.
+   - All binaries initialize `tkg_common::diagnostics::init_stderr_tracing` (`-v`/`-vv`/`-vvv` or `RUST_LOG`) directed strictly to `stderr`, keeping `stdout` wire protocols (`JSON-RPC` and `ProtoJSON`) and TUI output clean.
 6. **Thread Safety & Rust 2024 Compliance:**
    - **Zero** `std::env::set_var` or `remove_var` calls in production or test code. Parameterize environment lookups to prevent multithreaded data races.
-7. **Fast Verification Standard:**
-   - Use `cargo fast` (`cargo fast check`, `cargo fast clippy`, `cargo fast test`, `cargo fast build`) for rapid iteration powered by Cranelift and Mold.
+7. **Fast Verification & Quality Gate Standard:**
+   - Use `just fast` / `just ft` (Cranelift + Mold), `just fix` (fixed-point `rustc` + `clippy --fix` + `fmt` + test loop), and `just verify` (`fmt`, `clippy -D warnings`, `nextest`, doctests, `cargo deny check`, `cargo machete`, `typos`, `cargo doc`) before committing.
 
 ---
 
@@ -58,9 +59,15 @@ All autonomous agents and human contributors operating within this repository or
 +-----------------------------------------------------------------------------------+
 ```
 
-### Hierarchy & Fallback Rules
-- Workspace configuration always takes precedence: `<workspace>/.tkg/project.toml` $\to$ `<workspace>/project.toml` $\to$ `<workspace>/plugins/torqkage/project.toml`.
-- When operating in an external repository without a `project.toml`, `TorqKage` falls back to a **blank, restrictive default configuration** rather than making language assumptions.
+### Hierarchy & 4-Tier Cascaded Merge (`tkg_common::cascade`)
+Configuration loading uses `CascadedConfigLoader` across four precedence tiers (lowest to highest) rather than whole-file replacement:
+1. **Built-in Invariants & Ecosystem Auto-Detection:** Embedded defaults + disk manifest inference (`Cargo.toml`, `build.zig`, `go.mod`, `pyproject.toml`, `package.json`, `meson.build`, `CMakeLists.txt`).
+2. **User Global:** `~/.config/tkg/config.toml` (supports top-level `default_harness` shorthand), `~/.config/tkg/project.toml`, `~/.tkg/project.toml`, and installed plugin bundle configs.
+3. **Workspace Local:** `<ws>/plugins/torqkage/*.toml`, `<ws>/*.toml`, `<ws>/.tkg/*.toml`.
+4. **Runtime Env & CLI Overrides:** `--agent`/`-a`, `-r`/`--reset-breaker`, `--harness`, dotted-key overrides, and `-v`/`-vv`/`-vvv` verbosity flags.
+
+- Tables deep-merge recursively; arrays support `merge_strategy = "replace" | "append" | "prepend" | "unique"`.
+- Malformed TOML or invalid JSON configs always **fail closed** with line-numbered caret diagnostics (`TkgError::from_toml`), never falling back silently to permissive defaults.
 
 ### 2.1 Engine vs. Reference Fleet Separation
 `TorqKage` is fundamentally an **extensible, capability-governed engine and sandboxed MCP runtime**. The 10-agent fleet described in [Section 3](#3-agent-fleet-perimeters--blast-boundaries) represents the flagship reference implementation tailored for low-level systems engineering and Silicon Design Verification.
@@ -188,34 +195,39 @@ Enforced across all tools (`read_project_file`, `write_file`, `modify_code`, `se
 
 ## 7. Directory Layout of the Repository
 
-```
+```text
 torqkage/
 ├── ARCHITECTURE.md     # Canonical system architecture and invariant manual (this file)
-├── README.md           # Repository overview, visual workflow, and quickstart guide
-├── Cargo.toml          # Workspace root manifest (strict pedantic lints, zero warnings)
+├── README.md           # Repository overview, quickstart, configuration, and benchmarks
+├── Cargo.toml          # Workspace root manifest (strict workspace lints, fast/perf/min-size profiles)
 ├── deny.toml           # Supply-chain security, RustSec advisories, and license policy
-├── install.sh          # Self-contained bundle builder & Gemini plugin installer
-├── .github/workflows/  # Continuous Integration (cargo check, cargo test, clippy -D warnings)
-├── crates/             # Native 4-crate Rust workspace
-│   ├── tkg-common/     # Core domain models, project config, supervisor, Jujutsu, state
-│   ├── tkg-mcp/        # Declarative MCP server, tool execution engine, agent guards
-│   ├── tkg-hooks/      # High-assurance lifecycle interceptors (<1ms native execution)
-│   └── tkg-ctrl/       # Ratatui 0.30 TUI dashboard (binary: tkg), fleet matrix, and session explorer
+├── justfile            # Workspace automation (fast/perf/min-size, fix loop, nextest, sanitizers, verify)
+├── install.sh          # POSIX /bin/sh multi-arch installer, .sha256 verifier, and config scaffolder
+├── .clippy.toml        # Test-only lint exemptions for strict production safety
+├── .typos.toml         # Source & docs spellcheck exceptions
+├── .github/workflows/  # CI (ci.yml), macOS/Windows cross-platform checks (cross.yml), weekly (weekly.yml)
+├── docs/               # mdBook User & Engine Manual + ecosystem starter kits (docs/templates/)
+├── fuzz/               # cargo-fuzz harnesses (excluded from main workspace builds)
+├── crates/             # Native 4-crate Rust 2024 workspace
+│   ├── tkg-common/     # Core domain models, Harness trait, cascade, sessions, sandbox, supervisor, diagnostics, benches/
+│   ├── tkg-mcp/        # Persistent MCP daemon (stdio JSON-RPC 2.0, 14 actions, resources, prompts, in-band seatbelt)
+│   ├── tkg-hooks/      # Featherweight lifecycle interceptor CLI (avoids tokio, rusqlite, ratatui)
+│   └── tkg-ctrl/       # Interactive Ratatui 0.30 TUI dashboard (binary: tkg), language-agnostic catalog, launcher
 └── plugins/
-    └── torqkage/       # Self-contained plugin & fleet distribution bundle
+    └── torqkage/       # Self-contained plugin & reference 10-agent fleet bundle
         ├── plugin.json # Host manifest
         ├── hooks.json  # Host lifecycle hook bindings
         ├── project.toml# Declarative project contracts and multi-language scaffolds
         ├── hooks.toml  # Lifecycle interception pipeline and circuit breaker rules
-        ├── tools.toml  # Declarative MCP tool catalog and agent perimeters
+        ├── tools.toml  # Declarative MCP tool catalog, sandbox profiles, and output filters
         ├── README.md   # Plugin documentation and customization cookbook
-        ├── bin/        # Native binaries and acceleration helpers (cargo-fast, tkg*)
+        ├── bin/        # Local build/helper shims (cargo-fast, staged binaries)
         └── agents/     # Fleet specifications (coder, copilot, doc-author, finisher, etc.)
 ```
 
 ---
 
-## 8. High-Assurance Systems Architecture: The 4 Crates & Sandboxing
+## 8. High-Assurance Systems Architecture: The 4 Crates, Unified Harness & Sandboxing
 
 ### High-Level Topology
 
@@ -223,74 +235,79 @@ torqkage/
 flowchart TD
     subgraph Host ["Host & Human Interaction"]
         Operator["Human Operator (Terminal)"] <-->|"Ratatui 0.30 TUI"| Ctrl["tkg (Control Deck)"]
-        Ctrl -.->|"SQLite / Session Provider"| Sessions[("Conversation Histories &\nSummaries DB")]
+        Ctrl -.->|"Harness::discover_sessions()"| Sessions[("SQLite / JSONL / JSON\nSession Histories")]
     end
 
     subgraph RuntimeBridge ["Orchestration & Sandbox Bridge"]
-        Ctrl -->|"fork() / execvp(harness)\n(Raw mode suspended)"| HarnessCLI["Execution Harness Runtime"]
+        Ctrl -->|"Harness::build_spawn_cmd()\n(Raw mode suspended)"| HarnessCLI["Execution Harness Runtime\n(agy / claude / opencode / cursor / custom)"]
         Ctrl -.->|"jj workspace add .tkg/workspaces/<agent>"| JJWorkspaces[".tkg/workspaces/<agent>\n(Jujutsu Isolation)"]
     end
 
     subgraph PluginServices ["Lifecycle & Plugin Services"]
-        HarnessCLI <-->|"JSON-RPC 2.0 over stdio (pipes)"| MCPDaemon["tkg-mcp (Tool Daemon)"]
-        HarnessCLI <-->|"ProtoJSON on stdin / stdout\n(per lifecycle hook invocation)"| HooksRunner["tkg-hooks (Ephemeral CLI)"]
+        HarnessCLI <-->|"JSON-RPC 2.0 over stdio\n(tools, resources, prompts, seatbelt)"| MCPDaemon["tkg-mcp (Tool Daemon)"]
+        HarnessCLI <-->|"HookDialect stdin / stdout\n(ProtoJSON / Claude JSON)"| HooksRunner["tkg-hooks (Ephemeral CLI)"]
     end
 
-    subgraph DeclarativeState ["Declarative Manifests & State"]
-        ToolsTOML["plugins/torqkage/tools.toml\n(Tools, Templates, Guards)"] -.->|"Bootstrapped at startup"| MCPDaemon
+    subgraph DeclarativeState ["4-Tier Cascaded Configs & State"]
+        ToolsTOML["tools.toml\n(Tools, SandboxProfile, OutputFilter)"] -.->|"Cascaded load"| MCPDaemon
         ToolsTOML -.->|"Queried for mutating & permission flags"| HooksRunner
-        AgentMD["plugins/torqkage/agents/*.md\n(YAML frontmatter: mcp_tools, pre_launch_checks)"] -.->|"Dynamic Scoping"| MCPDaemon
+        AgentMD["agents/*.md\n(YAML frontmatter: mcp_tools, pre_launch_checks)"] -.->|"Dynamic Scoping"| MCPDaemon
         AgentMD -.->|"Pre-Launch Quality Gates"| HooksRunner
         AgentMD -.->|"F2 Save & Validate"| Ctrl
     end
 
-    subgraph ExecutionLayer ["Supervised Execution Layer"]
-        MCPDaemon -->|"SubprocessSupervisor\n(Process Group Isolation)"| Supervisor["tkg-common::SubprocessSupervisor"]
-        Supervisor -->|"bwrap --unshare-all (Optional)"| BwrapJail["Bubblewrap Sandbox"]
-        BwrapJail --> NativeTools["Native Binaries (cargo, jj, ast-grep, etc.)"]
+    subgraph ExecutionLayer ["Supervised Execution & Containment Layer"]
+        MCPDaemon -->|"SubprocessSupervisor\n(O_NONBLOCK + nix::poll + pgid)"| Supervisor["tkg-common::SubprocessSupervisor"]
+        Supervisor -->|"Linux bwrap --unshare-all\n(fail-closed unless allow_host_fallback)"| BwrapJail["Bubblewrap Sandbox\n([tools.<name>.sandbox])"]
+        Supervisor -.->|"macOS / Windows / Non-Hook Harness"| Seatbelt["Universal In-Band Seatbelt"]
+        BwrapJail --> NativeTools["Native Binaries (cargo, jj, etc.)"]
         MCPDaemon <-->|".tkg/state/circuit_breaker.json"| CircuitBreaker[("Circuit Breaker Ledger")]
         HooksRunner <-->|".tkg/state/handoff.json"| HandoffState[("Session Handoff Bridge")]
     end
 ```
 
-### 8.1 The 4 Crates Architecture
+### 8.1 The 4 Crates & Unified Harness Architecture
 1. **`tkg-common` (Systems Foundation):**
-   - **`SubprocessSupervisor`:** Enforces process tree lifecycle containment via safe process group isolation (`command-group`) and safe signal delivery. Guaranteed elimination of orphaned compiler tasks when parent processes exit.
-   - **`JujutsuWorkspace`:** Dynamic management of isolated Jujutsu workspaces at `.tkg/workspaces/<agent>/`, snapshotting, and atomic rebase/squash merging with rollback (`jj op restore`).
-   - **`ContentFilter`:** Language-agnostic syntactic path policies (`comments_only`, `tests_only`, `delimited`) preventing cross-boundary modifications during autonomous runs.
-   - **`TkgStatePaths`:** Canonical management of `.tkg/` state directories, circuit breaker ledgers, and handoff bridges.
+   - **`Harness` Capability Seam (`harness.rs`):** Unifies static CLI flags, `HarnessCapabilities` (`NATIVE_HOOKS`, `SESSION_RESUME`, `HEADLESS_SPAWN`, `NATIVE_MCP`), `HookDialect` (`ProtoJSON`, `ClaudeCode`), cross-platform session discovery (`sessions.rs`), config injection (`harness_install.rs` — `.mcp.json` + `.claude/settings.json`, `.cursor/mcp.json`, OpenCode/Antigravity bundles), and spawn command assembly for `Antigravity`, `ClaudeCode`, `OpenCode`, `Cursor`, and `CustomHarness`.
+   - **`CascadedConfigLoader` (`cascade.rs`):** 4-tier deep TOML merge (`merge_strategy` = `replace`/`append`/`prepend`/`unique`), `default_harness` shorthand normalization, and line-numbered caret parse errors (`TkgError::from_toml`).
+   - **`SubprocessSupervisor` (`supervisor.rs`):** Bounded deadline execution with Unix `O_NONBLOCK` + `nix::poll` pipe draining, staged `SIGTERM` -> grace -> `SIGKILL` `-pgid` process-group termination, and bounded post-exit drain preventing detached grandchild pipe hangs.
+   - **`JujutsuWorkspace` (`jujutsu.rs`):** Dynamic management of isolated Jujutsu workspaces at `.tkg/workspaces/<agent>/`, snapshotting, and gated rebase/squash merging with rollback (`jj op restore`).
+   - **`ContentFilter` (`content_filter.rs`):** Language-agnostic syntactic path policies (`comments_only`, `tests_only`, `delimited`).
+   - **`Diagnostics` (`diagnostics.rs`) & `TkgStatePaths` (`state.rs`):** `-v`/`-vv`/`-vvv` & `RUST_LOG` structured `tracing` to `stderr`, atomic file-locked `.tkg/state/` ledgers.
 2. **`tkg-mcp` (Declarative Model Context Protocol Daemon):**
-   - Implements native Model Context Protocol (MCP 2024-11-05) over stdio JSON-RPC.
-   - Dynamically parses `tools.toml`, synthesizes strict JSON Schemas, validates parameters against regex constraints, and enforces agent perimeter allowlists.
-   - Powered by 10 native action handlers: bounded file reading, atomic writing, `mpatch` fuzzy SEARCH/REPLACE block edits, in-process file search, parameterized CLI execution, compiler NDJSON diagnostic extraction, in-process manuals, project state inspection, and Jujutsu workspace lifecycle isolation.
+   - Implements native Model Context Protocol (MCP `2024-11-05`) over stdio JSON-RPC (`tools/*`, `resources/list` + `resources/read` for `tkg://rules` & `tkg://status`, and `prompts/list` + `prompts/get` for `tkg-refactor` & `tkg-audit`).
+   - Identifies the calling harness via `initialize.params.clientInfo.name`, `TKG_HARNESS`, or Linux `/proc/<ppid>/cmdline` fallback, automatically enabling the **Universal In-Band MCP Seatbelt** (`in_band_seatbelt`) when `NATIVE_HOOKS` is absent or on macOS/Windows.
+   - Applies `[tools.<name>.output_filter]` (`keep_regex`, `drop_regex`, `max_lines`) prior to output truncation and executes commands under `[tools.<name>.sandbox]` profiles.
 3. **`tkg-hooks` (Featherweight Interception Runner):**
-   - Ultra-fast native CLI (<1ms startup, <500KB RSS) executing lifecycle events: `detect-wip`, `check-conflicts`, `check-subagent`, `enforce-tool-policy`, `record-handoff`, and `inject-wake`.
-   - Protects critical build manifests (`Cargo.toml`) via `manifest_guard` and tracks consecutive compiler failure strikes via `circuit_breaker`.
+   - Kept as a lean, separate binary intentionally free of `tokio`, `rusqlite`, `ratatui`, and `tracing-subscriber` for minimal binary size and sub-millisecond cold CLI dispatch (`pre-tool-use`, `detect-wip`, `check-conflicts`, `check-subagent`, `enforce-tool-policy`, `record-handoff`, `inject-wake`).
+   - Auto-detects `ProtoJSON` vs Claude Code `PreToolUse`/`SessionStart`/`Stop` payloads and emits matching dialects cleanly to `stdout`.
 4. **`tkg-ctrl` (Interactive Ratatui 0.30 Terminal Deck — Binary: `tkg`):**
-   - Standalone terminal dashboard providing interactive Fleet Matrix navigation, declarative tool catalog inspection, real-time circuit breaker status with single-key reset (`c` / `Shift-K`), and session resumption across supported harnesses.
+   - Standalone terminal dashboard providing interactive Fleet Matrix navigation, language-agnostic `tools.toml` category tabs (no hardcoded ecosystem enums), real-time circuit breaker inspection/reset (`c` / `Shift-K` or CLI `-r`), and cross-harness session resumption.
 
-### 8.2 Bubblewrap Container-Grade Sandboxing
-- Untrusted execution (such as SymPy mathematical evaluation in `eval_symbolic_math`) is precision-jailed inside Bubblewrap (`bwrap --unshare-all`).
-- Runs with completely private PID, IPC, and network namespaces (`CLONE_NEWNET`, private loopback only, zero external sockets).
-- Filesystem mounted as read-only with a synthetic in-memory `tmpfs` root, eliminating host filesystem leakage or data exfiltration.
+### 8.2 Granular Sandboxing & Fail-Closed Container Detection
+- Tools opt into isolation via `enforce_sandbox = true`, `sandbox = true`, or a granular `[tools.<name>.sandbox]` profile (`engine = "bwrap" | "none"`, `allow_network`, `unshare_pid`, `read_only_binds`, `writable_binds`, `env_passthrough`, supporting `{cwd}` and `{home}` placeholders).
+- On Linux, `build_bubblewrap_command_with_profile` isolates namespaces (`--unshare-all`, private loopback when `allow_network = false`), mounts `/usr`/`/bin`/`/lib`/`/etc` read-only, masks credentials to `/dev/null`, and binds declared caches rw.
+- **Fail-Closed Guarantee:** Missing or non-functional `bwrap` (e.g. inside nested containers or non-Linux hosts) **fails closed** unless the tool explicitly configures `allow_host_fallback = true`. Outer container detection inspects `TKG_OUTER_SANDBOX`, harness sandbox env vars, container files (`/.dockerenv`, `/run/.containerenv`), `/proc/*/cgroup` runtime segments, `/proc/self/mountinfo` storage markers, nested `NSpid`, and container init comms (`tini`, `dumb-init`, `*bwrap*`).
 
 ### 8.3 External Tool Integrations
 - Optional external tools (such as Tree-sitter AST code graph engines or systems trace visualizers) can be discovered via `$PATH` when installed on the host system.
 
 ### 8.4 Native MCP Access Points & Execution Guarantees
-The `tkg-mcp` daemon replaces ambient shell access with 12 hardened native action handlers:
+The `tkg-mcp` daemon replaces ambient shell access with 14 native action handlers (`ToolAction`):
 1. **`file_read`:** Bounded file reader with line-range slicing (`start_line`, `end_line`) and UTF-8-safe byte caps.
 2. **`file_write`:** Atomic writer enforcing directory perimeters, manifest protection, VCS conflict gates, and syntactic path policies.
-3. **`mpatch_edit`:** Precision fuzzy block patcher (`<<<< SEARCH / ==== / >>>> REPLACE`) eliminating destructive full-file rewrites while verifying manifest protections and VCS conflicts.
-4. **`file_search`:** In-process fast regex/substring pattern search across repository files and project doc trees without external dependencies.
-5. **`static_command`:** Parameterless invocation of fixed audit binaries (`cargo check`, `cargo test`, `git status`).
-6. **`parameterized_command`:** Bounded execution with strict per-argument regex allowlists (`regex = "^[a-zA-Z0-9_\\-\\.]+$"`), typed arguments (`enum`, `integer`, `boolean`, `path`), and Bubblewrap container jails (`enforce_sandbox = true`).
-7. **`cli_manual`:** In-process system manual provider synthesizing `navi` cheat sheets, `tldr` summaries, manpage synopsis blocks, `--help` buffers, and compiler references directly into the agent's context.
-8. **`project_state`:** Synthesizes active VCS revision, dirty file status, Jujutsu working copy commit, quality gate health, and previous session handoff context into an executive summary.
+3. **`mpatch_edit`:** Precision fuzzy block patcher (`<<<< SEARCH / ==== / >>>> REPLACE`) eliminating full-file rewrites while verifying manifest protections and VCS conflicts.
+4. **`file_search`:** In-process regex/substring search across repository files and project doc trees without external dependencies.
+5. **`static_command`:** Parameterless invocation of fixed audit binaries under process-group supervision and optional `bwrap` sandboxing.
+6. **`parameterized_command`:** Bounded execution with strict per-argument regex/type/enum allowlists, conflict checks, and `[tools.<name>.sandbox]` / `output_filter` rules.
+7. **`cli_manual`:** In-process system manual provider synthesizing `navi` cheat sheets, `tldr` summaries, manpage synopsis blocks, `--help` buffers, and compiler references.
+8. **`project_state`:** Synthesizes active VCS revision, dirty file status, Jujutsu working copy commit, quality gate health, and previous session handoff context.
 9. **`workspace_ensure`:** Provisions, switches to, or validates an isolated Jujutsu sparse workspace for a subagent (`.tkg/workspaces/<agent>/`).
 10. **`workspace_inspect`:** Inspects working copy diffs and file modifications between subagent sparse workspaces and the main working tree.
-11. **`workspace_merge`:** Absorbs or merges changes from an isolated subagent workspace back into trunk with automatic conflict detection and rollback.
-12. **`set_active_agent`:** Dynamically switches the active agent persona in `.tkg/state/active_agent.json` to update tool allowances and path policies on the fly for multi-agent workflows across any harness.
+11. **`workspace_merge`:** Absorbs or merges changes from an isolated subagent workspace back into trunk with declarative gate checks and rollback.
+12. **`set_active_agent`:** Dynamically switches the active agent persona in `.tkg/state/active_agent.json` to update tool allowances and path policies on the fly.
+13. **`record_session_handoff`:** Records structured session summary metadata into `.tkg/state/`.
+14. **`detect_wip`:** Inspects uncommitted VCS working-copy modifications on demand.
 
 ---
 
