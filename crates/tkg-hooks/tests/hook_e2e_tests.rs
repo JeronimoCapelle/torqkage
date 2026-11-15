@@ -243,6 +243,63 @@ fn test_claude_dialect_deny_returns_exit_code_2_e2e() {
         Some("deny")
     );
 
+    // Auto-detected Claude Code payload (no TKG_HARNESS env var) on Deny:
+    // returns exit code 2 + Claude hookSpecificOutput JSON with permissionDecision = "deny"
+    let claude_deny_payload = serde_json::json!({
+        "session_id": "claude-auto-deny",
+        "cwd": ws,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "custom_writer",
+        "tool_input": { "path": "tests/test.rs", "content": "fn t() {}" },
+        "modelName": "scoped_agent"
+    })
+    .to_string();
+    let (code_auto_deny, stdout_auto_deny, stderr_auto_deny) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&claude_deny_payload), &[]);
+    assert_eq!(code_auto_deny, Some(2), "stderr: {stderr_auto_deny}");
+    assert!(stderr_auto_deny.contains("TorqKage policy violation"));
+    let v_deny: serde_json::Value =
+        serde_json::from_str(&stdout_auto_deny).expect("valid Claude JSON");
+    assert_eq!(
+        v_deny
+            .pointer("/hookSpecificOutput/hookEventName")
+            .and_then(serde_json::Value::as_str),
+        Some("PreToolUse")
+    );
+    assert_eq!(
+        v_deny
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+
+    // Auto-detected Claude Code payload on Ask (mutating tool):
+    // returns exit code 0 + Claude hookSpecificOutput JSON with permissionDecision = "ask"
+    let claude_ask_payload = serde_json::json!({
+        "session_id": "claude-auto-ask",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "modify_code",
+        "tool_input": { "path": "src/lib.rs" }
+    })
+    .to_string();
+    let (code_auto_ask, stdout_auto_ask, _) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&claude_ask_payload), &[]);
+    assert_eq!(code_auto_ask, Some(0));
+    let v_ask: serde_json::Value =
+        serde_json::from_str(&stdout_auto_ask).expect("valid Claude Ask JSON");
+    assert_eq!(
+        v_ask
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("ask")
+    );
+    assert!(
+        v_ask
+            .pointer("/hookSpecificOutput/permissionDecisionReason")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    );
+
     std::fs::remove_dir_all(&ws).expect("cleanup");
 }
 
@@ -310,6 +367,63 @@ fn test_corrupt_hooks_and_tools_toml_fail_closed_e2e() {
     let resp_tools: tkg_common::PreToolResponse =
         serde_json::from_str(&stdout_tools).expect("valid PreToolResponse");
     assert_eq!(resp_tools.decision, tkg_common::HookDecision::Deny);
+
+    // Auto-detected Claude Code payload (no TKG_HARNESS env var) on Deny:
+    // returns exit code 2 + Claude hookSpecificOutput JSON with permissionDecision = "deny"
+    let claude_deny_payload = serde_json::json!({
+        "session_id": "claude-auto-deny",
+        "cwd": ws,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "custom_writer",
+        "tool_input": { "path": "tests/test.rs", "content": "fn t() {}" },
+        "modelName": "scoped_agent"
+    })
+    .to_string();
+    let (code_auto_deny, stdout_auto_deny, stderr_auto_deny) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&claude_deny_payload), &[]);
+    assert_eq!(code_auto_deny, Some(2), "stderr: {stderr_auto_deny}");
+    assert!(stderr_auto_deny.contains("TorqKage policy violation"));
+    let v_deny: serde_json::Value =
+        serde_json::from_str(&stdout_auto_deny).expect("valid Claude JSON");
+    assert_eq!(
+        v_deny
+            .pointer("/hookSpecificOutput/hookEventName")
+            .and_then(serde_json::Value::as_str),
+        Some("PreToolUse")
+    );
+    assert_eq!(
+        v_deny
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+
+    // Auto-detected Claude Code payload on Ask (mutating tool):
+    // returns exit code 0 + Claude hookSpecificOutput JSON with permissionDecision = "ask"
+    let claude_ask_payload = serde_json::json!({
+        "session_id": "claude-auto-ask",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "modify_code",
+        "tool_input": { "path": "src/lib.rs" }
+    })
+    .to_string();
+    let (code_auto_ask, stdout_auto_ask, _) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&claude_ask_payload), &[]);
+    assert_eq!(code_auto_ask, Some(0));
+    let v_ask: serde_json::Value =
+        serde_json::from_str(&stdout_auto_ask).expect("valid Claude Ask JSON");
+    assert_eq!(
+        v_ask
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("ask")
+    );
+    assert!(
+        v_ask
+            .pointer("/hookSpecificOutput/permissionDecisionReason")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    );
 
     std::fs::remove_dir_all(&ws).expect("cleanup");
 }

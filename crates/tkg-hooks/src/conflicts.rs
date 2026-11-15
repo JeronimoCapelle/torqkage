@@ -17,18 +17,7 @@ pub(crate) fn execute() -> std::process::ExitCode {
 
     let response =
         detect_conflicts(&root).map_or_else(PreToolResponse::allow, PreToolResponse::deny);
-    crate::stdin::write_pre_tool_use_response(&response);
-
-    if response.decision == tkg_common::HookDecision::Deny
-        && crate::stdin::is_claude_harness_for_root(&root)
-    {
-        if let Some(ref reason) = response.reason {
-            eprintln!("TorqKage policy violation: {reason}");
-        }
-        std::process::ExitCode::from(2)
-    } else {
-        std::process::ExitCode::SUCCESS
-    }
+    crate::stdin::finalize_pre_tool_use(&response, &root, false, false)
 }
 
 /// Checks whether any conflicts exist in the repository.

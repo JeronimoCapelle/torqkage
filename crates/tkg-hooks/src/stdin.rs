@@ -96,6 +96,18 @@ impl HookDialect for ProtoJsonDialect {
                     ..parsed.common
                 };
             }
+            if parsed.common.conversation_id.is_none()
+                && let Some(session_id) = val.get("session_id").and_then(serde_json::Value::as_str)
+            {
+                parsed.common.conversation_id = Some(session_id.to_owned());
+            }
+            if parsed.common.transcript_path.is_none()
+                && let Some(tp) = val
+                    .get("transcript_path")
+                    .and_then(serde_json::Value::as_str)
+            {
+                parsed.common.transcript_path = Some(std::path::PathBuf::from(tp));
+            }
         }
         Ok(parsed)
     }
@@ -116,14 +128,14 @@ impl HookDialect for ClaudeCodeDialect {
             tkg_common::HookDecision::Ask | tkg_common::HookDecision::ForceAsk => "ask",
         };
         let mut hook_output = serde_json::json!({
-            "hookType": "PreToolUse",
+            "hookEventName": "PreToolUse",
             "permissionDecision": decision_str,
         });
         if let Some(ref reason) = resp.reason
             && let Some(map) = hook_output.as_object_mut()
         {
             map.insert(
-                "permissionDenialReason".to_owned(),
+                "permissionDecisionReason".to_owned(),
                 serde_json::json!(reason),
             );
         }
@@ -135,6 +147,16 @@ impl HookDialect for ClaudeCodeDialect {
 
 static PROTO_JSON: ProtoJsonDialect = ProtoJsonDialect;
 static CLAUDE_CODE: ClaudeCodeDialect = ClaudeCodeDialect;
+
+/// Returns true if a raw `stdin` JSON payload uses Claude Code hook fields
+/// (`tool_name` or `hook_event_name` without Antigravity `toolCall`).
+#[must_use]
+pub(crate) fn is_claude_payload(raw: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(raw).is_ok_and(|val| {
+        val.get("toolCall").is_none()
+            && (val.get("hook_event_name").is_some() || val.get("tool_name").is_some())
+    })
+}
 
 /// Returns true if the current environment indicates execution under Claude
 /// Code.
@@ -154,10 +176,22 @@ pub(crate) fn is_claude_harness_for_root(root: &std::path::Path) -> bool {
             .eq_ignore_ascii_case("claude")
 }
 
+/// Returns true when the Claude Code wire dialect should be used for a hook
+/// invocation given workspace config, environment, and incoming payload shape.
+#[must_use]
+pub(crate) fn is_claude_for_context(root: &std::path::Path, claude_payload: bool) -> bool {
+    claude_payload || is_claude_harness_for_root(root)
+}
+
 /// Returns the active [`HookDialect`].
 #[must_use]
 pub(crate) fn active_dialect() -> &'static dyn HookDialect {
-    if is_claude_harness() {
+    dialect_for(is_claude_harness())
+}
+
+#[must_use]
+fn dialect_for(use_claude: bool) -> &'static dyn HookDialect {
+    if use_claude {
         &CLAUDE_CODE
     } else {
         &PROTO_JSON
@@ -180,26 +214,51 @@ fn read_raw_stdin() -> Option<String> {
     }
 }
 
-/// Reads and deserializes a `PreToolUseInput` payload from `stdin` via the
-/// active [`HookDialect`].
+/// Reads a `PreToolUseInput` payload from `stdin` and reports whether the
+/// payload itself used Claude Code wire fields.
 #[must_use]
-pub(crate) fn read_pre_tool_use_input() -> PreToolUseInput {
+pub(crate) fn read_pre_tool_use_context() -> (PreToolUseInput, bool) {
     let Some(raw) = read_raw_stdin() else {
-        return PreToolUseInput::default();
+        return (PreToolUseInput::default(), false);
     };
-    match active_dialect().parse_pre_tool_use(&raw) {
-        Ok(val) => val,
+    let claude_payload = is_claude_payload(&raw);
+    let dialect = dialect_for(claude_payload || is_claude_harness());
+    match dialect.parse_pre_tool_use(&raw) {
+        Ok(val) => (val, claude_payload),
         Err(err) => {
             eprintln!("tkg-hooks: warning: failed to parse PreToolUse stdin payload: {err}");
-            PreToolUseInput::default()
+            (PreToolUseInput::default(), claude_payload)
         },
     }
 }
 
-/// Emits a `PreToolResponse` to `stdout` via the active [`HookDialect`].
-pub(crate) fn write_pre_tool_use_response(resp: &PreToolResponse) {
-    if let Ok(json) = active_dialect().format_pre_tool_use(resp) {
+/// Emits a `PreToolResponse` to `stdout` in the resolved harness dialect and
+/// returns the corresponding process exit code.
+pub(crate) fn finalize_pre_tool_use(
+    resp: &PreToolResponse,
+    root: &std::path::Path,
+    claude_payload: bool,
+    is_config_error: bool,
+) -> std::process::ExitCode {
+    let use_claude = is_claude_for_context(root, claude_payload);
+    if let Ok(json) = dialect_for(use_claude).format_pre_tool_use(resp) {
         println!("{json}");
+    }
+
+    match resp.decision {
+        tkg_common::HookDecision::Deny if use_claude => {
+            if let Some(ref reason) = resp.reason {
+                eprintln!("TorqKage policy violation: {reason}");
+            }
+            std::process::ExitCode::from(2)
+        },
+        tkg_common::HookDecision::Deny if is_config_error => std::process::ExitCode::FAILURE,
+        tkg_common::HookDecision::Ask | tkg_common::HookDecision::ForceAsk if use_claude => {
+            // Claude Code only reads `hookSpecificOutput.permissionDecision = "ask"`
+            // when the hook exits cleanly with status 0.
+            std::process::ExitCode::SUCCESS
+        },
+        _ => std::process::ExitCode::SUCCESS,
     }
 }
 
@@ -280,10 +339,14 @@ mod tests {
     #[test]
     fn test_dialect_normalizes_claude_code_pre_tool_use() {
         let raw = r#"{
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "hook_event_name": "PreToolUse",
             "tool_name": "Write",
             "tool_input": { "file_path": "src/lib.rs", "content": "fn main() {}" },
             "cwd": "/tmp/ws"
         }"#;
+        assert!(is_claude_payload(raw));
         let parsed = active_dialect().parse_pre_tool_use(raw).unwrap();
         let tc = parsed.tool_call.unwrap();
         assert_eq!(tc.name, "Write");
@@ -291,5 +354,19 @@ mod tests {
             parsed.common.workspace_paths.first(),
             Some(&std::path::PathBuf::from("/tmp/ws"))
         );
+        assert_eq!(parsed.common.conversation_id.as_deref(), Some("sess-1"));
+        assert_eq!(
+            parsed.common.transcript_path.as_deref(),
+            Some(std::path::Path::new("/tmp/transcript.jsonl"))
+        );
+    }
+
+    #[test]
+    fn test_proto_json_payload_is_not_detected_as_claude() {
+        let raw = r#"{
+            "toolCall": { "name": "modify_code", "args": { "path": "src/lib.rs" } },
+            "workspacePaths": ["/tmp/ws"]
+        }"#;
+        assert!(!is_claude_payload(raw));
     }
 }

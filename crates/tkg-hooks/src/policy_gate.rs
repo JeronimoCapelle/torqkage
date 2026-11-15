@@ -15,7 +15,7 @@ use crate::stdin;
 /// requested tool requires human confirmation (`ask`) or is authorized for
 /// autonomous execution (`allow`).
 pub(crate) fn execute() -> std::process::ExitCode {
-    let input = stdin::read_pre_tool_use_input();
+    let (input, claude_payload) = stdin::read_pre_tool_use_context();
     let root = input.common.resolve_workspace_root();
 
     let (response, is_config_error) = match evaluate_policy_checked(&input, &root) {
@@ -28,20 +28,7 @@ pub(crate) fn execute() -> std::process::ExitCode {
             )
         },
     };
-    stdin::write_pre_tool_use_response(&response);
-
-    if response.decision == tkg_common::HookDecision::Deny {
-        if stdin::is_claude_harness_for_root(&root) {
-            if let Some(ref reason) = response.reason {
-                eprintln!("TorqKage policy violation: {reason}");
-            }
-            return std::process::ExitCode::from(2);
-        }
-        if is_config_error {
-            return std::process::ExitCode::FAILURE;
-        }
-    }
-    std::process::ExitCode::SUCCESS
+    stdin::finalize_pre_tool_use(&response, &root, claude_payload, is_config_error)
 }
 
 /// Evaluates a tool call against the granular security policy, failing closed
