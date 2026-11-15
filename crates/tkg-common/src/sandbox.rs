@@ -1,17 +1,19 @@
 //! # sandbox
 //!
-//! Declarative sandboxing detection, Bubblewrap jail creation, and security isolation primitives.
+//! Declarative sandboxing detection, Bubblewrap jail creation, and security
+//! isolation primitives.
 
 use std::{path::Path, process::Command};
 
-/// Checks if the current process is already executing inside an outer sandbox or container.
+/// Checks if the current process is already executing inside an outer sandbox
+/// or container.
 #[must_use]
 pub fn is_inside_container() -> bool {
     is_inside_container_with(|var| std::env::var(var).is_ok())
 }
 
-/// Checks if the current process is already executing inside an outer sandbox or container
-/// using a custom environment variable lookup closure.
+/// Checks if the current process is already executing inside an outer sandbox
+/// or container using a custom environment variable lookup closure.
 #[must_use]
 pub fn is_inside_container_with<F>(env_lookup: F) -> bool
 where
@@ -34,22 +36,22 @@ where
 
     // 3. Container signatures in /proc/1/cgroup or /proc/self/cgroup
     for cgroup_path in &["/proc/1/cgroup", "/proc/self/cgroup"] {
-        if let Ok(cgroup) = std::fs::read_to_string(cgroup_path) {
-            let lower = cgroup.to_ascii_lowercase();
-            if lower.contains("docker")
-                || lower.contains("containerd")
-                || lower.contains("kubepods")
-                || lower.contains("podman")
-                || lower.contains("lxc")
-                || lower.contains("libpod")
-                || lower.contains("sandbox")
-            {
-                return true;
-            }
+        if let Ok(cgroup) = std::fs::read_to_string(cgroup_path)
+            && cgroup_indicates_container(&cgroup)
+        {
+            return true;
         }
     }
 
-    // 4. Nested PID namespace: if NSpid has > 1 entries, process is in an unshared PID namespace (e.g. bwrap --unshare-pid)
+    // 4. Container runtime mount markers in /proc/self/mountinfo
+    if let Ok(mountinfo) = std::fs::read_to_string("/proc/self/mountinfo")
+        && mountinfo_indicates_container(&mountinfo)
+    {
+        return true;
+    }
+
+    // 4. Nested PID namespace: if NSpid has > 1 entries, process is in an
+    //    unshared PID namespace (e.g. bwrap --unshare-pid)
     if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
         for line in status.lines() {
             if let Some(rest) = line.strip_prefix("NSpid:")
@@ -60,7 +62,8 @@ where
         }
     }
 
-    // 5. Container-specific init processes (e.g. tini, dumb-init) or non-standard init in isolated environments
+    // 5. Container-specific init processes (e.g. tini, dumb-init) or
+    //    non-standard init in isolated environments
     if let Ok(comm) = std::fs::read_to_string("/proc/1/comm") {
         let comm_trimmed = comm.trim();
         let known_host_inits = [
@@ -86,7 +89,59 @@ where
     false
 }
 
-/// Builds a Bubblewrap command wrapping the specified binary and arguments in an isolated jail.
+/// Checks whether a `/proc/*/cgroup` snapshot places the process inside a
+/// known container runtime cgroup hierarchy.
+fn cgroup_indicates_container(cgroup: &str) -> bool {
+    const RUNTIMES: [&str; 6] = [
+        "docker",
+        "containerd",
+        "kubepods",
+        "podman",
+        "lxc",
+        "libpod",
+    ];
+
+    for line in cgroup.lines() {
+        let Some((_, path)) = line.rsplit_once(':') else {
+            continue;
+        };
+        let lower = path.to_ascii_lowercase();
+        for segment in lower.split('/') {
+            if RUNTIMES.iter().any(|rt| {
+                segment.strip_prefix(rt).is_some_and(|rest| {
+                    rest.is_empty() || rest.starts_with('-') || rest.starts_with('.')
+                })
+            }) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Checks `/proc/self/mountinfo` for known container storage or runtime mount
+/// markers without trusting generic host overlays.
+fn mountinfo_indicates_container(mountinfo: &str) -> bool {
+    const MARKERS: [&str; 6] = [
+        "docker/overlay2",
+        "containers/storage",
+        "containerd/",
+        "libpod/",
+        "lxcfs",
+        "/run/host/container-manager",
+    ];
+
+    for line in mountinfo.lines() {
+        let lower = line.to_ascii_lowercase();
+        if MARKERS.iter().any(|marker| lower.contains(marker)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Builds a Bubblewrap command wrapping the specified binary and arguments in
+/// an isolated jail.
 #[must_use]
 pub fn build_bubblewrap_command(
     binary: &str,
@@ -125,8 +180,9 @@ pub fn build_bubblewrap_command(
         "/dev",
     ]);
 
-    // If workspace_root is an isolated subagent workspace (e.g. .tkg/workspaces/<agent>),
-    // mount the repo root and shared build caches so symlinks resolve correctly in bwrap
+    // If workspace_root is an isolated subagent workspace (e.g.
+    // .tkg/workspaces/<agent>), mount the repo root and shared build caches so
+    // symlinks resolve correctly in bwrap
     let repo_root = crate::resolver::WorkspaceResolver::find_root(Some(workspace_root))
         .unwrap_or_else(|_| workspace_root.to_path_buf());
 
@@ -170,7 +226,8 @@ mod tests {
     #[test]
     fn test_is_inside_container_env() {
         assert!(is_inside_container_with(|var| var == "AGY_OUTER_SANDBOX"));
-        // Generic, easily spoofed variables must not change the result versus a clean environment.
+        // Generic, easily spoofed variables must not change the result versus a
+        // clean environment.
         let baseline = is_inside_container_with(|_| false);
         assert_eq!(
             is_inside_container_with(|var| var == "SANDBOX" || var == "CONTAINER"),
@@ -189,5 +246,35 @@ mod tests {
         );
         let program = cmd.get_program().to_string_lossy();
         assert_eq!(program, "bwrap");
+    }
+
+    #[test]
+    fn test_cgroup_detection_rejects_generic_sandbox_slice() {
+        assert!(!cgroup_indicates_container(
+            "0::/user.slice/user-1000.slice/sandbox.slice/app.scope\n"
+        ));
+        assert!(!cgroup_indicates_container(
+            "0::/user.slice/my-docker-docs.service\n"
+        ));
+        assert!(cgroup_indicates_container(
+            "0::/system.slice/docker-0123456789abcdef.scope\n"
+        ));
+        assert!(cgroup_indicates_container("12:pids:/kubepods/pod123\n"));
+        assert!(cgroup_indicates_container(
+            "0::/machine.slice/libpod-abc.scope\n"
+        ));
+    }
+
+    #[test]
+    fn test_mountinfo_detection_requires_runtime_markers() {
+        assert!(!mountinfo_indicates_container(
+            "25 0 259:2 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw\n"
+        ));
+        assert!(mountinfo_indicates_container(
+            "42 30 0:39 / / rw,relatime - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/abc\n"
+        ));
+        assert!(mountinfo_indicates_container(
+            "55 30 0:40 / /proc/cpuinfo rw - fuse.lxcfs lxcfs rw\n"
+        ));
     }
 }

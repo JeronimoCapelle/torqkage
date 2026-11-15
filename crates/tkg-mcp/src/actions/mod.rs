@@ -20,8 +20,9 @@ use tkg_common::{CircuitBreakerLedger, SubprocessSupervisor, extract_compiler_er
 
 use crate::models::{AgentGuard, OutputCapture, ToolAction, ToolDefinition};
 
-/// Processes raw subprocess `Output` into a formatted, ANSI-stripped, and truncated `(text, is_error)` tuple
-/// according to `tool` capture, fallback, and exit-code settings.
+/// Processes raw subprocess `Output` into a formatted, ANSI-stripped, and
+/// truncated `(text, is_error)` tuple according to `tool` capture, fallback,
+/// and exit-code settings.
 #[must_use]
 pub(crate) fn process_command_output(
     output: &std::process::Output,
@@ -127,10 +128,12 @@ pub(crate) fn process_command_output(
     (truncated, is_error)
 }
 
-/// Executes a command either sandboxed via Bubblewrap or directly with supervisor hygiene.
+/// Executes a command either sandboxed via Bubblewrap or directly with
+/// supervisor hygiene.
 ///
 /// # Errors
-/// Returns an error message if sandbox setup fails or the supervised command fails to execute.
+/// Returns an error message if sandbox setup fails or the supervised command
+/// fails to execute.
 pub(crate) fn execute_supervised_command(
     program: &str,
     base_args: &[String],
@@ -151,7 +154,8 @@ pub(crate) fn execute_supervised_command(
     )
 }
 
-/// Executes a command with configurable sandbox detection (useful for dependency injection in tests).
+/// Executes a command with configurable sandbox detection (useful for
+/// dependency injection in tests).
 pub(crate) fn execute_supervised_command_with_detector<F>(
     program: &str,
     args: (&[String], &[String]),
@@ -163,6 +167,36 @@ pub(crate) fn execute_supervised_command_with_detector<F>(
 ) -> Result<std::process::Output, String>
 where
     F: Fn() -> bool,
+{
+    execute_supervised_command_with_env(
+        program,
+        args,
+        workspace_root,
+        timeout_seconds,
+        sandbox,
+        tool_name,
+        is_outer_sandbox,
+        || which::which("bwrap").is_ok(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Test injection helper preserves public-within-crate signature cleanly"
+)]
+fn execute_supervised_command_with_env<F, B>(
+    program: &str,
+    args: (&[String], &[String]),
+    workspace_root: &Path,
+    timeout_seconds: u64,
+    sandbox: (bool, bool),
+    tool_name: &str,
+    is_outer_sandbox: F,
+    has_bwrap: B,
+) -> Result<std::process::Output, String>
+where
+    F: Fn() -> bool,
+    B: Fn() -> bool,
 {
     if !program.contains('/') && which::which(program).is_err() {
         return Err(format!(
@@ -177,7 +211,7 @@ where
     let resolved_env = project_cfg.resolved_environment(workspace_root);
 
     if enforce_sandbox {
-        if which::which("bwrap").is_ok() {
+        if has_bwrap() {
             let resolved_program = if program.contains('/') {
                 program.to_owned()
             } else {
@@ -244,7 +278,8 @@ where
 /// Returns a tuple of `(output_text, is_error)`.
 ///
 /// # Errors
-/// Returns an error message if the tool parameters, pre-flight gates, or execution fails.
+/// Returns an error message if the tool parameters, pre-flight gates, or
+/// execution fails.
 pub(crate) fn dispatch_action(
     tool: &ToolDefinition,
     workspace_root: &Path,
@@ -640,7 +675,8 @@ mod tests {
             ..Default::default()
         };
 
-        // Repeated parameter validation errors should NOT increment circuit breaker strikes
+        // Repeated parameter validation errors should NOT increment circuit
+        // breaker strikes
         let err1 = update_circuit_breaker(
             &tool,
             &temp_dir,
@@ -687,7 +723,8 @@ mod tests {
             ..Default::default()
         };
 
-        // In a directory with no Cargo.toml and no git, pre-flight guards pass gracefully
+        // In a directory with no Cargo.toml and no git, pre-flight guards pass
+        // gracefully
         let res = evaluate_pre_flight_guards(&tool, &temp_dir);
         res.unwrap();
 
@@ -817,5 +854,54 @@ mod tests {
         assert!(out.contains("ReadyForDV"));
 
         drop(std::fs::remove_dir_all(&temp_dir));
+    }
+
+    #[test]
+    fn test_missing_bwrap_fails_closed_without_explicit_host_fallback() {
+        let workspace = std::env::temp_dir();
+
+        // Even inside an outer container, allow_host_fallback = false must fail closed.
+        let err = execute_supervised_command_with_env(
+            "true",
+            (&[], &[]),
+            &workspace,
+            5,
+            (true, false),
+            "guarded_tool",
+            || true,
+            || false,
+        )
+        .unwrap_err();
+        assert!(err.contains("Security enforcement error"));
+        assert!(err.contains("'bwrap' was not found"));
+        assert!(err.contains("allow_host_fallback = true"));
+
+        // Opting in still fails closed outside an outer container.
+        let err_host = execute_supervised_command_with_env(
+            "true",
+            (&[], &[]),
+            &workspace,
+            5,
+            (true, true),
+            "guarded_tool",
+            || false,
+            || false,
+        )
+        .unwrap_err();
+        assert!(err_host.contains("'bwrap' was not found"));
+
+        // Explicit opt-in + verified outer container succeeds.
+        let output = execute_supervised_command_with_env(
+            "true",
+            (&[], &[]),
+            &workspace,
+            5,
+            (true, true),
+            "guarded_tool",
+            || true,
+            || false,
+        )
+        .unwrap();
+        assert!(output.status.success());
     }
 }
