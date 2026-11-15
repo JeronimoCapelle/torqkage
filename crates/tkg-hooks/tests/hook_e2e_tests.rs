@@ -239,7 +239,8 @@ fn test_claude_dialect_deny_returns_exit_code_2_e2e() {
     );
 
     // Auto-detected Claude Code payload (no TKG_HARNESS env var) on Deny:
-    // returns exit code 2 + Claude hookSpecificOutput JSON with permissionDecision = "deny"
+    // returns exit code 2 + Claude hookSpecificOutput JSON with
+    // permissionDecision = "deny"
     let claude_deny_payload = serde_json::json!({
         "session_id": "claude-auto-deny",
         "cwd": ws,
@@ -269,7 +270,8 @@ fn test_claude_dialect_deny_returns_exit_code_2_e2e() {
     );
 
     // Auto-detected Claude Code payload on Ask (mutating tool):
-    // returns exit code 0 + Claude hookSpecificOutput JSON with permissionDecision = "ask"
+    // returns exit code 0 + Claude hookSpecificOutput JSON with
+    // permissionDecision = "ask"
     let claude_ask_payload = serde_json::json!({
         "session_id": "claude-auto-ask",
         "hook_event_name": "PreToolUse",
@@ -364,7 +366,8 @@ fn test_corrupt_hooks_and_tools_toml_fail_closed_e2e() {
     assert_eq!(resp_tools.decision, tkg_common::HookDecision::Deny);
 
     // Auto-detected Claude Code payload (no TKG_HARNESS env var) on Deny:
-    // returns exit code 2 + Claude hookSpecificOutput JSON with permissionDecision = "deny"
+    // returns exit code 2 + Claude hookSpecificOutput JSON with
+    // permissionDecision = "deny"
     let claude_deny_payload = serde_json::json!({
         "session_id": "claude-auto-deny",
         "cwd": ws,
@@ -394,7 +397,8 @@ fn test_corrupt_hooks_and_tools_toml_fail_closed_e2e() {
     );
 
     // Auto-detected Claude Code payload on Ask (mutating tool):
-    // returns exit code 0 + Claude hookSpecificOutput JSON with permissionDecision = "ask"
+    // returns exit code 0 + Claude hookSpecificOutput JSON with
+    // permissionDecision = "ask"
     let claude_ask_payload = serde_json::json!({
         "session_id": "claude-auto-ask",
         "hook_event_name": "PreToolUse",
@@ -449,7 +453,8 @@ fn test_claude_session_start_pre_invocation_and_custom_subagent_tools_e2e() {
     )
     .expect("write hooks.toml");
 
-    // 1. Custom subagent_tools blocks unpermitted write inside subagent dispatch
+    // 1. Custom subagent_tools blocks unpermitted write inside subagent
+    //    dispatch
     let subagent_call = serde_json::json!({
         "session_id": "claude-sub-1",
         "cwd": ws,
@@ -472,7 +477,8 @@ fn test_claude_session_start_pre_invocation_and_custom_subagent_tools_e2e() {
         Some("deny")
     );
 
-    // 2. Claude Stop + SessionStart roundtrip emits hookSpecificOutput.additionalContext
+    // 2. Claude Stop + SessionStart roundtrip emits
+    //    hookSpecificOutput.additionalContext
     let stop_payload = serde_json::json!({
         "session_id": "claude-stop-1",
         "cwd": ws,
@@ -510,7 +516,8 @@ fn test_claude_session_start_pre_invocation_and_custom_subagent_tools_e2e() {
     );
 
     // 3. Claude UserPromptSubmit (PreInvocation via detect-wip) emits
-    //    UserPromptSubmit hookSpecificOutput when workspace has uncommitted VCS changes
+    //    UserPromptSubmit hookSpecificOutput when workspace has uncommitted VCS
+    //    changes
     let git_init = Command::new("git")
         .args(["init", "-q"])
         .current_dir(&ws)

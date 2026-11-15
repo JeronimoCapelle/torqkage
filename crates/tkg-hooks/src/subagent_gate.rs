@@ -32,12 +32,14 @@ pub(crate) fn execute() -> std::process::ExitCode {
     stdin::finalize_pre_tool_use(&response, &root, claude_payload, is_config_error)
 }
 
-/// Evaluates a tool invocation input against the default `invoke_subagent` tool name.
+/// Evaluates a tool invocation input against the default `invoke_subagent` tool
+/// name.
 pub(crate) fn evaluate_tool_invocation(input: &PreToolUseInput) -> PreToolResponse {
     evaluate_tool_invocation_with_check(input)
 }
 
-/// Evaluates a tool invocation input only when the tool matches `subagent_tools`.
+/// Evaluates a tool invocation input only when the tool matches
+/// `subagent_tools`.
 pub(crate) fn evaluate_tool_invocation_for_tools(
     input: &PreToolUseInput,
     subagent_tools: &[String],

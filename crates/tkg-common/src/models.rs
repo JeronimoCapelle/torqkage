@@ -922,7 +922,8 @@ mod tests {
             Some("FAIL  src/tests/auth.test.ts".to_owned())
         );
 
-        // 4. Multi-language compiler & test failure fallbacks (Rust test, Python, Go)
+        // 4. Multi-language compiler & test failure fallbacks (Rust test,
+        //    Python, Go)
         let rust_test_output =
             "test tests::smoke ... FAILED\n\ntest result: failed. 0 passed; 1 failed;";
         assert!(extract_compiler_error_signature(rust_test_output, None).is_some());

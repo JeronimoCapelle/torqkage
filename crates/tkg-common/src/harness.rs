@@ -1,11 +1,11 @@
 //! # harness
 //!
-//! The [`Harness`] trait is the single capability-driven seam between `TorqKage`
-//! and an agent execution harness (Antigravity, `OpenCode`, Claude Code, Cursor,
-//! or any custom CLI). Every harness concern — static flags and directory
-//! layout, [`HarnessCapabilities`], hook wire dialect ([`HookDialect`]), session
-//! discovery ([`SessionMeta`]), spawn command assembly, and config injection —
-//! lives in an implementation of this trait.
+//! The [`Harness`] trait is the single capability-driven seam between
+//! `TorqKage` and an agent execution harness (Antigravity, `OpenCode`, Claude
+//! Code, Cursor, or any custom CLI). Every harness concern — static flags and
+//! directory layout, [`HarnessCapabilities`], hook wire dialect
+//! ([`HookDialect`]), session discovery ([`SessionMeta`]), spawn command
+//! assembly, and config injection — lives in an implementation of this trait.
 //!
 //! Adding a new harness means: implement [`Harness`] and register it in
 //! [`resolve`] (and [`builtin_harnesses`]).
@@ -178,8 +178,8 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
     /// Discovers prior sessions for `agent_name` in `workspace_root`.
     ///
     /// # Errors
-    /// Returns [`TkgError`] if backend session lookup encounters an unrecoverable
-    /// failure.
+    /// Returns [`TkgError`] if backend session lookup encounters an
+    /// unrecoverable failure.
     fn discover_sessions(
         &self,
         agent_name: &str,
@@ -193,7 +193,7 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
     fn latest_session(&self, agent_name: &str, workspace_root: &Path) -> Option<SessionMeta> {
         self.discover_sessions(agent_name, workspace_root)
             .ok()
-            .and_then(|mut sessions| sessions.drain(..).next())
+            .and_then(|sessions| sessions.into_iter().next())
     }
 
     /// Returns `(config_or_bundle_path, is_installed, is_symlink)` for TUI/CLI
@@ -223,6 +223,10 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
     /// Constructs the spawn [`Command`] for launching this harness with
     /// workspace environment, optional agent selection, prompt, resume ID, and
     /// sandbox flags.
+    #[allow(
+        clippy::literal_string_with_formatting_args,
+        reason = "Command template placeholders like {agent}, {conversation}, and {prompt} are not Rust format strings"
+    )]
     fn build_spawn_cmd(
         &self,
         _workspace_root: &Path,

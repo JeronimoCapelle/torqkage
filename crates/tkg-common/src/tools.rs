@@ -251,7 +251,8 @@ pub struct RawTool {
     pub output_filter: Option<ToolOutputFilter>,
 }
 
-/// Declarative line filtering & diagnostic pruning rules (`[tools.<name>.output_filter]`).
+/// Declarative line filtering & diagnostic pruning rules
+/// (`[tools.<name>.output_filter]`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ToolOutputFilter {
     #[serde(default)]
@@ -263,7 +264,8 @@ pub struct ToolOutputFilter {
 }
 
 impl ToolOutputFilter {
-    /// Returns `true` when no keep, drop, or max-line pruning rules are configured.
+    /// Returns `true` when no keep, drop, or max-line pruning rules are
+    /// configured.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.keep_regex.is_empty() && self.drop_regex.is_empty() && self.max_lines.is_none()
@@ -377,7 +379,8 @@ impl ToolDefinition {
     }
 
     /// Returns `true` when this tool serves project documentation (via explicit
-    /// `[docs] tool_name` or a case-insensitive `"documentation"`/`"docs"` category).
+    /// `[docs] tool_name` or a case-insensitive `"documentation"`/`"docs"`
+    /// category).
     #[must_use]
     pub fn is_documentation_tool(&self, project: &crate::project::ProjectConfig) -> bool {
         project.docs.tool_name.as_deref() == Some(&self.name)
@@ -707,8 +710,8 @@ impl RawToolsConfig {
     /// attaching `path` context and line/column caret diagnostics on error.
     ///
     /// # Errors
-    /// Returns [`crate::error::TkgError::ConfigParse`] if the content fails TOML
-    /// deserialization.
+    /// Returns [`crate::error::TkgError::ConfigParse`] if the content fails
+    /// TOML deserialization.
     pub fn parse_with_path(
         path: Option<&std::path::Path>,
         content: &str,
@@ -720,8 +723,8 @@ impl RawToolsConfig {
     /// Parses a `tools.toml` content string into a `RawToolsConfig`.
     ///
     /// # Errors
-    /// Returns [`crate::error::TkgError::ConfigParse`] if the content fails TOML
-    /// deserialization.
+    /// Returns [`crate::error::TkgError::ConfigParse`] if the content fails
+    /// TOML deserialization.
     pub fn parse(content: &str) -> Result<Self, crate::error::TkgError> {
         Self::parse_with_path(None, content)
     }

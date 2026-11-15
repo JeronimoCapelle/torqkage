@@ -120,8 +120,8 @@ pub(crate) fn write_pre_invocation_for_context(
     }
 }
 
-/// Reads and deserializes a `StopInput` payload from `stdin` and reports whether
-/// the payload used Claude Code fields.
+/// Reads and deserializes a `StopInput` payload from `stdin` and reports
+/// whether the payload used Claude Code fields.
 #[must_use]
 pub(crate) fn read_stop_context() -> (StopInput, bool) {
     read_stdin_context("Stop", |d, raw| d.parse_stop(raw))
@@ -139,8 +139,8 @@ pub(crate) fn write_stop_for_context(
     }
 }
 
-/// Reads and deserializes a `SessionStartInput` payload from `stdin` and reports
-/// whether the payload used Claude Code fields.
+/// Reads and deserializes a `SessionStartInput` payload from `stdin` and
+/// reports whether the payload used Claude Code fields.
 #[must_use]
 pub(crate) fn read_session_start_context() -> (SessionStartInput, bool) {
     read_stdin_context("SessionStart", |d, raw| d.parse_session_start(raw))

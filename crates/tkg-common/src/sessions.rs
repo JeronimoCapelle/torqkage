@@ -1,5 +1,6 @@
 //! Multi-harness conversation session discovery across SQLite (`agy`),
-//! Claude Code JSONL transcripts, `OpenCode` JSON files, and `.tkg/state/sessions`.
+//! Claude Code JSONL transcripts, `OpenCode` JSON files, and
+//! `.tkg/state/sessions`.
 
 use std::path::{Path, PathBuf};
 
@@ -32,7 +33,8 @@ impl SessionMeta {
     }
 }
 
-/// Discovers JSON session metadata files stored under `dirs`, sorted newest first.
+/// Discovers JSON session metadata files stored under `dirs`, sorted newest
+/// first.
 #[must_use]
 pub fn discover_json_sessions_in_dirs(dirs: &[PathBuf], agent_name: &str) -> Vec<SessionMeta> {
     let mut sessions = Vec::new();
@@ -59,7 +61,8 @@ pub fn discover_json_sessions_in_dirs(dirs: &[PathBuf], agent_name: &str) -> Vec
     sessions
 }
 
-/// Discovers `OpenCode` session files across workspace and user data directories.
+/// Discovers `OpenCode` session files across workspace and user data
+/// directories.
 #[must_use]
 pub fn discover_opencode_sessions(agent_name: &str, workspace_root: &Path) -> Vec<SessionMeta> {
     let mut candidate_dirs = vec![
@@ -76,7 +79,8 @@ pub fn discover_opencode_sessions(agent_name: &str, workspace_root: &Path) -> Ve
     discover_json_sessions_in_dirs(&candidate_dirs, agent_name)
 }
 
-/// Discovers generic `TorqKage` session JSON snapshots under `.tkg/state/sessions`.
+/// Discovers generic `TorqKage` session JSON snapshots under
+/// `.tkg/state/sessions`.
 #[must_use]
 pub fn discover_generic_state_sessions(
     agent_name: &str,
@@ -88,9 +92,11 @@ pub fn discover_generic_state_sessions(
 
 fn encode_claude_project_slug(path: &Path, normalize_punct: bool) -> String {
     let raw = path.to_string_lossy();
-    raw.chars()
+    let stripped = raw.strip_prefix(r"\\?\").unwrap_or(&raw);
+    stripped
+        .chars()
         .map(|c| {
-            if c == '/' || c == '\\' || (normalize_punct && (c == '.' || c == '_')) {
+            if matches!(c, '/' | '\\' | ':' | '?') || (normalize_punct && matches!(c, '.' | '_')) {
                 '-'
             } else {
                 c
@@ -240,8 +246,8 @@ fn parse_claude_jsonl_session(
     })
 }
 
-/// Discovers Claude Code JSONL transcript sessions under `projects_dir` matching
-/// `workspace_root`, sorted newest first.
+/// Discovers Claude Code JSONL transcript sessions under `projects_dir`
+/// matching `workspace_root`, sorted newest first.
 #[must_use]
 pub fn discover_claude_sessions_in(
     projects_dir: &Path,
@@ -471,8 +477,8 @@ mod sqlite {
         false
     }
 
-    /// Queries Antigravity's `conversation_summaries.db` and `history.jsonl` for
-    /// resumable sessions matching `agent_name` and `workspace_root`.
+    /// Queries Antigravity's `conversation_summaries.db` and `history.jsonl`
+    /// for resumable sessions matching `agent_name` and `workspace_root`.
     #[must_use]
     pub fn query_session_from_sources(
         db_path: &Path,
@@ -925,5 +931,14 @@ mod tests {
         assert_eq!(first.preview, "Harness detection refactored");
 
         _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_encode_claude_project_slug_windows_safe() {
+        let verbatim = Path::new(r"\\?\C:\Users\runner\ws.project");
+        let slug = encode_claude_project_slug(verbatim, true);
+        assert!(!slug.contains(':'));
+        assert!(!slug.contains('?'));
+        assert_eq!(slug, "C--Users-runner-ws-project");
     }
 }

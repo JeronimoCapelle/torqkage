@@ -1,6 +1,7 @@
 //! Structured diagnostic logging configured via `-v`/`-vv`/`-vvv` or
 //! `RUST_LOG`, always directed to `stderr` so `stdout` wire protocols
-//! (`tkg-mcp` JSON-RPC and `tkg-hooks` `ProtoJSON`) and TUI output remain clean.
+//! (`tkg-mcp` JSON-RPC and `tkg-hooks` `ProtoJSON`) and TUI output remain
+//! clean.
 
 #[cfg(feature = "diagnostics")]
 use tracing_subscriber::EnvFilter;
@@ -15,7 +16,8 @@ pub enum DefaultVerbosity {
 }
 
 /// Counts `-v`, `-vv`, `-vvv`, and `--verbose` CLI arguments and returns
-/// `(verbosity, stripped_args)` with verbosity flags removed (stopping at `--`).
+/// `(verbosity, stripped_args)` with verbosity flags removed (stopping at
+/// `--`).
 #[must_use]
 pub fn extract_verbosity_and_strip_args(args: &[String]) -> (u8, Vec<String>) {
     let mut verbosity: u8 = 0;

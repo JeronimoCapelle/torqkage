@@ -176,7 +176,8 @@ pub(crate) fn run_diagnostics(workspace_root: &Path) -> DiagnosticsReport {
 }
 
 /// Registers or installs the `TorqKage` configuration for the selected
-/// execution harness via [`Harness::inject_configs`](tkg_common::harness::Harness::inject_configs).
+/// execution harness via
+/// [`Harness::inject_configs`](tkg_common::harness::Harness::inject_configs).
 pub(crate) fn register_harness_config(
     workspace_root: &Path,
     runner: &tkg_common::ProjectRunnerConfig,

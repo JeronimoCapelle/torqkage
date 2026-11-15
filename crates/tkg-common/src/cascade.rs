@@ -2,8 +2,10 @@
 //!
 //! Tiers (lowest to highest priority):
 //! 1. Hardcoded / inferred workspace invariants
-//! 2. User-global configuration (`~/.config/tkg/project.toml`, `~/.tkg/project.toml`, `~/.config/tkg/config.toml`)
-//! 3. Workspace-local configuration (`<ws>/plugins/torqkage/project.toml`, `<ws>/project.toml`, `<ws>/.tkg/project.toml`, `<ws>/.tkg/config.toml`)
+//! 2. User-global configuration (`~/.config/tkg/project.toml`,
+//!    `~/.tkg/project.toml`, `~/.config/tkg/config.toml`)
+//! 3. Workspace-local configuration (`<ws>/plugins/torqkage/project.toml`,
+//!    `<ws>/project.toml`, `<ws>/.tkg/project.toml`, `<ws>/.tkg/config.toml`)
 //! 4. Runtime environment and CLI overrides
 
 use std::path::{Path, PathBuf};
@@ -208,7 +210,8 @@ impl CascadedConfigLoader {
     /// Deserializes the merged TOML table into `T`.
     ///
     /// # Errors
-    /// Returns [`TkgError::Toml`] if the merged configuration does not match `T`.
+    /// Returns [`TkgError::Toml`] if the merged configuration does not match
+    /// `T`.
     pub fn deserialize<T: DeserializeOwned>(self) -> Result<T, TkgError> {
         Ok(toml::Value::Table(self.table).try_into()?)
     }
@@ -225,7 +228,8 @@ pub fn project_cascade_paths(workspace_root: &Path, home: Option<&Path>) -> Vec<
         paths.push(h.join(".tkg/project.toml"));
         paths.push(h.join(".config/tkg/config.toml"));
     }
-    // Tier 3: Workspace local config (plugin -> root -> .tkg/project -> .tkg/config)
+    // Tier 3: Workspace local config (plugin -> root -> .tkg/project ->
+    // .tkg/config)
     paths.push(
         workspace_root
             .join(crate::harness::local_plugin_rel_dir())
@@ -258,7 +262,8 @@ mod tests {
             )
             .unwrap();
 
-        // Tier 2: Global ~/.config/tkg/config.toml sets default_harness = "claude"
+        // Tier 2: Global ~/.config/tkg/config.toml sets default_harness =
+        // "claude"
         loader
             .layer_str(
                 None,
@@ -268,7 +273,8 @@ mod tests {
             )
             .unwrap();
 
-        // Tier 3: Workspace .tkg/config.toml only overrides [sandbox] with append
+        // Tier 3: Workspace .tkg/config.toml only overrides [sandbox] with
+        // append
         loader
             .layer_str(
                 None,
@@ -280,7 +286,8 @@ mod tests {
             )
             .unwrap();
 
-        // Tier 4: CLI override sets extra arg cleanly without clobbering runner.harness
+        // Tier 4: CLI override sets extra arg cleanly without clobbering
+        // runner.harness
         loader.override_kv("project.version", toml::Value::String("0.2.0".to_owned()));
 
         let tbl = loader.into_table();

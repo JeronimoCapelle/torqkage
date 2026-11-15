@@ -367,7 +367,8 @@ mod tests {
             "Audit"
         );
         assert_eq!(make_tool("mypy", Some("types")).category, "types");
-        // Omitted or blank categories fall back cleanly to "Tools" without Rust heuristics
+        // Omitted or blank categories fall back cleanly to "Tools" without Rust
+        // heuristics
         assert_eq!(make_tool("cargo_clippy", None).category, "Tools");
         assert_eq!(make_tool("custom_tool", Some("   ")).category, "Tools");
     }

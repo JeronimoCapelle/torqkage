@@ -343,7 +343,8 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(temp_dir.join(".tkg")).unwrap();
-        // Blocking `.tkg/state` with a regular file forces state persistence to fail on all platforms/UIDs.
+        // Blocking `.tkg/state` with a regular file forces state persistence to
+        // fail on all platforms/UIDs.
         std::fs::write(temp_dir.join(".tkg/state"), b"not-a-directory").unwrap();
 
         let ledger = crate::CircuitBreakerLedger::new("tester");

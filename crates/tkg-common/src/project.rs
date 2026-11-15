@@ -1545,14 +1545,20 @@ ABS_DIR = "/opt/target"
         let parsed = parse_project_toml(sample).unwrap();
         let envs = parsed.resolved_environment(ws);
 
-        assert_eq!(&envs["CARGO_TARGET_DIR"], "/workspace/myproject/target");
+        assert_eq!(
+            &envs["CARGO_TARGET_DIR"],
+            ws.join("target").to_string_lossy().as_ref()
+        );
         assert_eq!(&envs["CARGO_TERM_COLOR"], "always");
         assert_eq!(&envs["RUST_BACKTRACE"], "1");
         assert_eq!(&envs["CC"], "clang");
-        assert_eq!(&envs["OUTPUT_DIR"], "/workspace/myproject/build");
+        assert_eq!(
+            &envs["OUTPUT_DIR"],
+            ws.join("build").to_string_lossy().as_ref()
+        );
         assert_eq!(
             &envs["PARENT_CACHE"],
-            "/workspace/myproject/../shared_cache"
+            ws.join("../shared_cache").to_string_lossy().as_ref()
         );
         assert_eq!(&envs["CUSTOM_WS"], "/workspace/myproject/custom");
         assert_eq!(&envs["ABS_DIR"], "/opt/target");

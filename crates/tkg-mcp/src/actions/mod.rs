@@ -895,7 +895,8 @@ mod tests {
     fn test_missing_bwrap_fails_closed_without_explicit_host_fallback() {
         let workspace = std::env::temp_dir();
 
-        // Even inside an outer container, allow_host_fallback = false must fail closed.
+        // Even inside an outer container, allow_host_fallback = false must fail
+        // closed.
         let strict_sandbox = tkg_common::tools::ToolSandboxPolicy {
             enforce_sandbox: true,
             allow_host_fallback: false,
