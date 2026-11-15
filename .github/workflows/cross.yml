@@ -1,8 +1,10 @@
 name: Cross-Platform Check
 
-# Enabled on workflow_dispatch until DX-04 gates `nix` under `cfg(unix)` and
-# isolates Linux-only `bwrap` integration tests for macOS/Windows runners.
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 env:

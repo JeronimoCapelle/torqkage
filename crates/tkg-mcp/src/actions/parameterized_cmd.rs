@@ -575,6 +575,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     fn is_bwrap_functional() -> bool {
         if which::which("bwrap").is_err() {
             return false;
@@ -586,6 +587,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_enforce_sandbox_via_bwrap() {
         if !is_bwrap_functional() || which::which("python3").is_err() {
             return;
@@ -621,6 +623,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_enforce_sandbox_blocks_network() {
         if !is_bwrap_functional() || which::which("python3").is_err() {
             return;

@@ -887,9 +887,16 @@ mod tests {
         assert!(err_host.contains("'bwrap' was not found"));
 
         // Explicit opt-in + verified outer container succeeds.
+        #[cfg(unix)]
+        let (prog, prog_args): (&str, Vec<String>) = ("true", Vec::new());
+        #[cfg(windows)]
+        let (prog, prog_args): (&str, Vec<String>) = (
+            "cmd",
+            vec!["/C".to_owned(), "exit".to_owned(), "0".to_owned()],
+        );
         let output = execute_supervised_command_with_env(
-            "true",
-            (&[], &[]),
+            prog,
+            (&prog_args, &[]),
             &workspace,
             5,
             (true, true),
