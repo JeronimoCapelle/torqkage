@@ -17,7 +17,6 @@ tkg-common = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml = { workspace = true }
 which = { workspace = true }
 mpatch = { workspace = true }
 regex = { workspace = true }
