@@ -1,6 +1,7 @@
 //! # launcher
 //!
-//! Interactive process launcher and pre-flight validation pipeline for dispatching agent sessions from `tkg`.
+//! Interactive process launcher and pre-flight validation pipeline for
+//! dispatching agent sessions from `tkg`.
 
 use std::{
     fmt::Write,
@@ -62,7 +63,8 @@ impl PreLaunchReport {
     }
 }
 
-/// Executes all mandatory and advisory pre-launch checks before booting an agent session.
+/// Executes all mandatory and advisory pre-launch checks before booting an
+/// agent session.
 ///
 /// This provides a modular, extensible hook for gating agent execution.
 pub(crate) fn run_pre_launch_checks(
@@ -130,7 +132,8 @@ pub(crate) fn run_pre_launch_checks(
 
 /// Suspends Ratatui, runs pre-launch checks, and spawns an interactive session.
 ///
-/// Builds a configured `Command` ready to execute for the configured execution harness.
+/// Builds a configured `Command` ready to execute for the configured execution
+/// harness.
 #[must_use]
 pub(crate) fn build_harness_command(
     workspace_root: &Path,
@@ -181,8 +184,9 @@ pub(crate) fn build_harness_command(
     cmd
 }
 
-/// Resolves the target working directory for launching an agent session, creating or syncing an isolated
-/// Jujutsu workspace if `isolated_workspace` is enabled and falling back to `workspace_root` on error.
+/// Resolves the target working directory for launching an agent session,
+/// creating or syncing an isolated Jujutsu workspace if `isolated_workspace` is
+/// enabled and falling back to `workspace_root` on error.
 fn resolve_launch_workspace(
     workspace_root: &Path,
     agent_name: &str,
@@ -203,11 +207,12 @@ fn resolve_launch_workspace(
     }
 }
 
-/// Interactive launcher: suspends Ratatui, runs pre-flight checks, spawns the agent session,
-/// and restores the terminal on exit.
+/// Interactive launcher: suspends Ratatui, runs pre-flight checks, spawns the
+/// agent session, and restores the terminal on exit.
 ///
 /// # Errors
-/// Returns an error string if pre-launch checks fail or if the harness cannot be executed.
+/// Returns an error string if pre-launch checks fail or if the harness cannot
+/// be executed.
 pub(crate) fn launch_agent_interactive(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     workspace_root: &Path,
@@ -233,7 +238,12 @@ pub(crate) fn launch_agent_interactive(
 
     let (effective_workspace, was_isolated) =
         resolve_launch_workspace(workspace_root, &agent.name, isolated_workspace);
-    drop(tkg_common::set_active_agent(workspace_root, &agent.name));
+    if let Err(err) = tkg_common::set_active_agent(workspace_root, &agent.name) {
+        eprintln!(
+            "⚠️ [tkg] warning: failed to record active agent '{}': {err}",
+            agent.name
+        );
+    }
 
     // Print friendly launcher header
     println!("\n================================================================================");
@@ -319,10 +329,12 @@ pub(crate) fn launch_agent_interactive(
     status_res.map_err(|e| format!("Failed to execute '{binary}': {e}"))
 }
 
-/// Headless launcher: runs pre-launch checks and spawns the configured agent harness directly from CLI.
+/// Headless launcher: runs pre-launch checks and spawns the configured agent
+/// harness directly from CLI.
 ///
 /// # Errors
-/// Returns an error string if pre-launch checks fail or if the harness cannot be spawned.
+/// Returns an error string if pre-launch checks fail or if the harness cannot
+/// be spawned.
 pub(crate) fn launch_agent_headless(
     workspace_root: &Path,
     agent: &AgentManifest,
@@ -341,7 +353,12 @@ pub(crate) fn launch_agent_headless(
 
     let (effective_workspace, was_isolated) =
         resolve_launch_workspace(workspace_root, &agent.name, isolated_workspace);
-    drop(tkg_common::set_active_agent(workspace_root, &agent.name));
+    if let Err(err) = tkg_common::set_active_agent(workspace_root, &agent.name) {
+        eprintln!(
+            "⚠️ [tkg] warning: failed to record active agent '{}': {err}",
+            agent.name
+        );
+    }
 
     if let Some(conv_id) = resume_conversation {
         println!(
@@ -490,11 +507,12 @@ mod tests {
             modified: false,
         };
 
-        // When run against an empty temporary directory with no Cargo.toml, gatekeeper passes cleanly
+        // When run against an empty temporary directory with no Cargo.toml,
+        // gatekeeper passes cleanly
         let temp_dir = std::env::temp_dir();
         let report = run_pre_launch_checks(&temp_dir, &manifest);
-        // The only errors should be missing manifest file and possibly harness CLI if PATH is weird,
-        // but no cargo check errors from gatekeeper
+        // The only errors should be missing manifest file and possibly harness
+        // CLI if PATH is weird, but no cargo check errors from gatekeeper
         assert!(
             !report
                 .errors

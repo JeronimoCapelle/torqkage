@@ -1,10 +1,14 @@
-//! Centralized state and workspace path resolution for the `TorqKage` ecosystem.
+//! Centralized state and workspace path resolution for the `TorqKage`
+//! ecosystem.
 //!
 //! All runtime state, isolated workspaces, and inter-agent artifacts are
 //! consolidated under the `.tkg/` root directory in the workspace root:
-//! - `.tkg/state/`: Ephemeral runtime state (circuit breaker ledger, session handoffs, active agent bridges)
-//! - `.tkg/workspaces/`: Isolated subagent Jujutsu worktrees (`.tkg/workspaces/<agent>`)
-//! - `.tkg/artifacts/`: Checkpoints, performance profiles, and generated deliverables
+//! - `.tkg/state/`: Ephemeral runtime state (circuit breaker ledger, session
+//!   handoffs, active agent bridges)
+//! - `.tkg/workspaces/`: Isolated subagent Jujutsu worktrees
+//!   (`.tkg/workspaces/<agent>`)
+//! - `.tkg/artifacts/`: Checkpoints, performance profiles, and generated
+//!   deliverables
 
 use std::path::{Path, PathBuf};
 
@@ -52,13 +56,15 @@ impl TkgStatePaths {
         self.root().join(Self::STATE_DIR)
     }
 
-    /// The `.tkg/workspaces` directory for isolated subagent Jujutsu workspaces.
+    /// The `.tkg/workspaces` directory for isolated subagent Jujutsu
+    /// workspaces.
     #[must_use]
     pub fn workspaces_dir(&self) -> PathBuf {
         self.root().join(Self::WORKSPACES_DIR)
     }
 
-    /// Path to a specific subagent's isolated workspace: `.tkg/workspaces/<agent>`.
+    /// Path to a specific subagent's isolated workspace:
+    /// `.tkg/workspaces/<agent>`.
     #[must_use]
     pub fn agent_workspace(&self, agent: &str) -> PathBuf {
         self.workspaces_dir().join(agent)
@@ -70,13 +76,15 @@ impl TkgStatePaths {
         self.root().join(Self::ARTIFACTS_DIR)
     }
 
-    /// The `.tkg/cache` directory for transient ephemeral caches (WIP diffs, hashes).
+    /// The `.tkg/cache` directory for transient ephemeral caches (WIP diffs,
+    /// hashes).
     #[must_use]
     pub fn cache_dir(&self) -> PathBuf {
         self.root().join(Self::CACHE_DIR)
     }
 
-    /// Path to the WIP change hash cache file for a specific conversation session.
+    /// Path to the WIP change hash cache file for a specific conversation
+    /// session.
     #[must_use]
     pub fn wip_cache_file(&self, conversation_id: Option<&str>) -> PathBuf {
         let filename = conversation_id.map_or_else(
@@ -92,39 +100,45 @@ impl TkgStatePaths {
         self.cache_dir().join("wip").join(filename)
     }
 
-    /// Resolves the circuit breaker ledger file path (`.tkg/state/circuit_breaker.json`).
+    /// Resolves the circuit breaker ledger file path
+    /// (`.tkg/state/circuit_breaker.json`).
     #[must_use]
     pub fn circuit_breaker_file(&self) -> PathBuf {
         self.state_dir().join(Self::CIRCUIT_BREAKER_FILE)
     }
 
-    /// Resolves the structured handoff JSON file path (`.tkg/state/handoff.json`).
+    /// Resolves the structured handoff JSON file path
+    /// (`.tkg/state/handoff.json`).
     #[must_use]
     pub fn handoff_json_file(&self) -> PathBuf {
         self.state_dir().join(Self::HANDOFF_JSON_FILE)
     }
 
-    /// Resolves the human-readable handoff Markdown file path (`.tkg/state/last_handoff.md`).
+    /// Resolves the human-readable handoff Markdown file path
+    /// (`.tkg/state/last_handoff.md`).
     #[must_use]
     pub fn handoff_md_file(&self) -> PathBuf {
         self.state_dir().join(Self::HANDOFF_MD_FILE)
     }
 
-    /// Resolves the active agent bridge file path (`.tkg/state/active_agent.json`).
+    /// Resolves the active agent bridge file path
+    /// (`.tkg/state/active_agent.json`).
     #[must_use]
     pub fn active_agent_file(&self) -> PathBuf {
         self.state_dir().join(Self::ACTIVE_AGENT_FILE)
     }
 
-    /// Resolves the session checkpoint file path (`.tkg/artifacts/checkpoint.json`).
+    /// Resolves the session checkpoint file path
+    /// (`.tkg/artifacts/checkpoint.json`).
     #[must_use]
     pub fn checkpoint_file(&self) -> PathBuf {
         self.artifacts_dir().join(Self::CHECKPOINT_FILE)
     }
 
     /// Ensures that the core `.tkg/` state and cache directories exist on disk.
-    /// Automatically provisions a self-protecting `<workspace>/.tkg/.gitignore` with `*`
-    /// to guarantee external target Git repositories keep `.tkg/` cleanly ignored.
+    /// Automatically provisions a self-protecting `<workspace>/.tkg/.gitignore`
+    /// with `*` to guarantee external target Git repositories keep `.tkg/`
+    /// cleanly ignored.
     ///
     /// # Errors
     /// Returns `std::io::Error` if directory or `.gitignore` creation fails.
@@ -134,7 +148,8 @@ impl TkgStatePaths {
         std::fs::create_dir_all(self.artifacts_dir())?;
         std::fs::create_dir_all(self.cache_dir().join("wip"))?;
 
-        // Self-protecting gitignore: guarantees git ignores .tkg in any project automatically
+        // Self-protecting gitignore: guarantees git ignores .tkg in any project
+        // automatically
         let gitignore = self.root().join(".gitignore");
         if !gitignore.exists() {
             std::fs::write(&gitignore, "*\n")?;
@@ -145,7 +160,8 @@ impl TkgStatePaths {
 
 /// Resolves the currently active agent name using hierarchical discovery:
 /// 1. `TKG_AGENT` environment variable
-/// 2. harness-specific environment variables (see [`crate::Harness::agent_env_vars`])
+/// 2. harness-specific environment variables (see
+///    [`crate::Harness::agent_env_vars`])
 /// 3. `AGENT` environment variable
 /// 4. `MCP_SCOPE` environment variable
 /// 5. `.tkg/state/active_agent.json` (`{"agent": "..."}`)
@@ -191,10 +207,12 @@ pub fn resolve_active_agent(workspace_root: &Path) -> Option<String> {
     None
 }
 
-/// Persists `agent_name` as the active agent in `.tkg/state/active_agent.json` and `.tkg/state/active_agent`.
+/// Persists `agent_name` as the active agent in `.tkg/state/active_agent.json`
+/// and `.tkg/state/active_agent`.
 ///
 /// # Errors
-/// Returns `std::io::Error` if creating directories or atomically writing the state file fails.
+/// Returns `std::io::Error` if creating directories or atomically writing the
+/// state file fails.
 pub fn set_active_agent(workspace_root: &Path, agent_name: &str) -> std::io::Result<()> {
     let paths = TkgStatePaths::new(workspace_root);
     let payload = serde_json::json!({
@@ -209,11 +227,13 @@ pub fn set_active_agent(workspace_root: &Path, agent_name: &str) -> std::io::Res
     Ok(())
 }
 
-/// Writes `content` to `path` atomically by creating a temporary file in the same parent directory,
-/// writing all bytes, and performing an atomic POSIX `rename(2)` via [`tempfile::NamedTempFile::persist`].
+/// Writes `content` to `path` atomically by creating a temporary file in the
+/// same parent directory, writing all bytes, and performing an atomic POSIX
+/// `rename(2)` via [`tempfile::NamedTempFile::persist`].
 ///
 /// # Errors
-/// Returns `std::io::Error` if parent directory creation, temporary file write, or atomic rename fails.
+/// Returns `std::io::Error` if parent directory creation, temporary file write,
+/// or atomic rename fails.
 pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
 
@@ -301,7 +321,7 @@ mod tests {
         let temp_dir =
             std::env::temp_dir().join(format!("tkg_test_resolve_agent_{}", std::process::id()));
         let paths = TkgStatePaths::new(&temp_dir);
-        drop(paths.ensure_directories());
+        paths.ensure_directories().unwrap();
 
         let json = serde_json::json!({ "agent": "reviewer" });
         std::fs::write(
@@ -312,6 +332,28 @@ mod tests {
 
         assert_eq!(resolve_active_agent(&temp_dir), Some("reviewer".to_owned()));
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used, reason = "Unit test assertions")]
+    fn test_state_writes_fail_closed_on_unwritable_state_dir() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tkg_test_unwritable_state_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(temp_dir.join(".tkg")).unwrap();
+        // Blocking `.tkg/state` with a regular file forces state persistence to fail on all platforms/UIDs.
+        std::fs::write(temp_dir.join(".tkg/state"), b"not-a-directory").unwrap();
+
+        let ledger = crate::CircuitBreakerLedger::new("tester");
+        assert!(ledger.save(&temp_dir).is_err());
+        assert!(set_active_agent(&temp_dir, "tester").is_err());
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

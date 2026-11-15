@@ -95,7 +95,8 @@ impl App {
         self.launch_config.isolated_workspace
     }
 
-    /// Constructs a new `App` state by discovering agents and tools in `workspace_root`.
+    /// Constructs a new `App` state by discovering agents and tools in
+    /// `workspace_root`.
     pub(crate) fn new(workspace_root: PathBuf) -> Result<Self, String> {
         let tools = if let Some(path) = find_tools_config_path(&workspace_root) {
             eprintln!(
@@ -152,7 +153,8 @@ impl App {
             Some(tkg_common::CircuitBreakerLedger::load(&self.workspace_root));
     }
 
-    /// Toggles Jujutsu workspace isolation (`.tkg/workspaces/<agent>`) for launched sessions.
+    /// Toggles Jujutsu workspace isolation (`.tkg/workspaces/<agent>`) for
+    /// launched sessions.
     pub(crate) fn toggle_isolated_workspace(&mut self) {
         self.launch_config.isolated_workspace = !self.launch_config.isolated_workspace;
         let mode = if self.launch_config.isolated_workspace {
@@ -177,7 +179,8 @@ impl App {
         }
     }
 
-    /// Discovers the latest resumable session for the selected agent in this workspace.
+    /// Discovers the latest resumable session for the selected agent in this
+    /// workspace.
     pub(crate) fn refresh_selected_agent_session(&mut self) {
         if let Some(agent) = self.selected_agent() {
             self.active_agent_session = crate::session::find_agent_session_with_runner(
@@ -190,7 +193,8 @@ impl App {
         }
     }
 
-    /// Toggles outer-loop Bubblewrap sandbox execution on or off for launched sessions.
+    /// Toggles outer-loop Bubblewrap sandbox execution on or off for launched
+    /// sessions.
     pub(crate) fn toggle_sandbox(&mut self) {
         self.launch_config.sandbox_enabled = !self.launch_config.sandbox_enabled;
         let mode = if self.launch_config.sandbox_enabled {
@@ -201,7 +205,8 @@ impl App {
         self.status_message = Some((format!("Terminal Sandbox {mode}"), false));
     }
 
-    /// Cycles the selected agent's permission policy mode between Autonomous, Supervised, and Planning.
+    /// Cycles the selected agent's permission policy mode between Autonomous,
+    /// Supervised, and Planning.
     pub(crate) fn cycle_selected_agent_policy(&mut self) {
         if let Some(agent) = self.selected_agent_mut() {
             let desc = agent.cycle_permission_policy();
@@ -210,7 +215,8 @@ impl App {
         }
     }
 
-    /// Toggles whether the highlighted tool requires an interactive permission prompt (ASK vs ALLOW).
+    /// Toggles whether the highlighted tool requires an interactive permission
+    /// prompt (ASK vs ALLOW).
     pub(crate) fn toggle_tool_permission_gate(&mut self) {
         let is_tool_tab = matches!(self.active_tab, ActiveTab::ToolCatalog);
         let is_fleet_tool = matches!(self.active_tab, ActiveTab::FleetOverview)
@@ -231,8 +237,9 @@ impl App {
         }
     }
 
-    /// Requests launching an interactive agent session for the currently selected agent.
-    /// If `resume` is true and a previous session exists for this workspace, resumes it.
+    /// Requests launching an interactive agent session for the currently
+    /// selected agent. If `resume` is true and a previous session exists for
+    /// this workspace, resumes it.
     pub(crate) fn request_launch(&mut self, resume: bool) {
         if let Some(agent) = self.selected_agent() {
             let resume_id = if resume {
@@ -339,7 +346,8 @@ impl App {
         }
     }
 
-    /// Returns a mutable reference to the currently highlighted tool item based on active filtering.
+    /// Returns a mutable reference to the currently highlighted tool item based
+    /// on active filtering.
     pub(crate) fn current_highlighted_tool_mut(&mut self) -> Option<&mut ToolItem> {
         let idx = self.selected_tool_idx;
         match self.active_tab {
@@ -428,7 +436,8 @@ impl App {
         self.manual_scroll = 0;
     }
 
-    /// Runs in-deck harness registration/installation and system health diagnostics.
+    /// Runs in-deck harness registration/installation and system health
+    /// diagnostics.
     pub(crate) fn run_installer_and_diagnostics(&mut self) {
         let project_cfg = tkg_common::project::ProjectConfig::detect_or_load(&self.workspace_root);
         let runner = project_cfg.resolved_runner();
@@ -478,12 +487,13 @@ impl App {
         }
 
         // 1. Take VCS snapshot
-        drop(take_vcs_snapshot(
+        let snapshot_status = take_vcs_snapshot(
             &self.workspace_root,
             &format!(
                 "snapshot before saving {modified_agents} agent configs and {modified_tools} tool modifications"
             ),
-        ));
+        );
+        self.status_message = Some((snapshot_status, false));
 
         // 2. Save modified tool permission gates to disk
         let target_path = find_tools_config_path(&self.workspace_root)
@@ -492,11 +502,21 @@ impl App {
             if !tool.modified {
                 continue;
             }
-            drop(update_tool_permission_gate_in_file(
+            if let Err(err) = update_tool_permission_gate_in_file(
                 &target_path,
                 &tool.name,
                 tool.require_permission_gate(),
-            ));
+            ) {
+                self.validation_modal = Some((
+                    false,
+                    format!(
+                        "Failed to save tool gate '{}' to {}:\n{err}",
+                        tool.name,
+                        target_path.display()
+                    ),
+                ));
+                return;
+            }
             tool.modified = false;
         }
 

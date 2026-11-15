@@ -1,4 +1,5 @@
-//! VCS snapshotting, atomic serialization, and declarative contract validation engine.
+//! VCS snapshotting, atomic serialization, and declarative contract validation
+//! engine.
 
 use std::{fmt::Write, path::Path, process::Command};
 
@@ -6,7 +7,8 @@ use tkg_common::{DEFAULT_TOOL_TIMEOUT_SECS, DEFAULT_VCS_QUERY_TIMEOUT_SECS, Subp
 
 use crate::model::AgentManifest;
 
-/// Writes an agent manifest back to disk using the frontmatter format of the configured harness.
+/// Writes an agent manifest back to disk using the frontmatter format of the
+/// configured harness.
 pub(crate) fn save_agent_to_disk(
     agent: &AgentManifest,
     harness: &dyn tkg_common::Harness,
@@ -16,7 +18,8 @@ pub(crate) fn save_agent_to_disk(
         .map_err(|e| format!("Failed to write {}: {e}", agent.file_path.display()))
 }
 
-/// Takes a quick VCS snapshot before applying edits to ensure atomic recovery without clobbering user descriptions.
+/// Takes a quick VCS snapshot before applying edits to ensure atomic recovery
+/// without clobbering user descriptions.
 pub(crate) fn take_vcs_snapshot(workspace_root: &Path, message: &str) -> String {
     if workspace_root.join(".jj").is_dir() {
         // Query current description to avoid clobbering user's commit message
@@ -29,14 +32,16 @@ pub(crate) fn take_vcs_snapshot(workspace_root: &Path, message: &str) -> String 
         let has_description =
             desc_output.is_ok_and(|out| !String::from_utf8_lossy(&out.stdout).trim().is_empty());
         if has_description {
-            // Trigger working-copy snapshot without mutating existing description
+            // Trigger working-copy snapshot without mutating existing
+            // description
             let mut status_cmd = Command::new("jj");
             status_cmd.current_dir(workspace_root);
             status_cmd.arg("status");
-            drop(SubprocessSupervisor::run_supervised(
-                status_cmd,
-                DEFAULT_VCS_QUERY_TIMEOUT_SECS,
-            ));
+            if let Err(err) =
+                SubprocessSupervisor::run_supervised(status_cmd, DEFAULT_VCS_QUERY_TIMEOUT_SECS)
+            {
+                return format!("Jujutsu snapshot check warning: {err}");
+            }
             return "Existing Jujutsu revision preserved at @".to_owned();
         }
 
@@ -63,7 +68,8 @@ fn resolve_plugin_directory(workspace_root: &Path) -> Option<std::path::PathBuf>
     tkg_common::harness::plugin_install_dir(&runner).filter(|p| p.is_dir())
 }
 
-/// Runs in-process native schema validation across project.toml, tools.toml, and agent manifests.
+/// Runs in-process native schema validation across project.toml, tools.toml,
+/// and agent manifests.
 pub(crate) fn validate_declarative_contracts(workspace_root: &Path) -> Result<String, String> {
     let mut report = String::from("=== NATIVE DECLARATIVE CONTRACT VALIDATION ===\n");
 
@@ -113,7 +119,8 @@ pub(crate) fn validate_declarative_contracts(workspace_root: &Path) -> Result<St
     Ok(report)
 }
 
-/// Validates the declarative contracts natively, and conditionally chains the harness's plugin validator if supported.
+/// Validates the declarative contracts natively, and conditionally chains the
+/// harness's plugin validator if supported.
 pub(crate) fn run_plugin_validation(workspace_root: &Path) -> Result<String, String> {
     let mut report = validate_declarative_contracts(workspace_root)?;
     let project_cfg = tkg_common::ProjectConfig::detect_or_load(workspace_root);

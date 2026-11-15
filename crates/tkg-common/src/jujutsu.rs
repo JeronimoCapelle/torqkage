@@ -16,7 +16,8 @@ use crate::{
 pub struct JujutsuWorkspace;
 
 impl JujutsuWorkspace {
-    /// Checks whether the target directory or its ancestors is a Jujutsu repository.
+    /// Checks whether the target directory or its ancestors is a Jujutsu
+    /// repository.
     #[must_use]
     pub fn is_jj_repo(workspace_root: &Path) -> bool {
         if workspace_root.join(".jj").exists() {
@@ -29,7 +30,8 @@ impl JujutsuWorkspace {
             .is_ok_and(|out| out.status.success())
     }
 
-    /// Returns the active workspace name (e.g., `"default"`, `"subagent_a"`) for `workspace_root`.
+    /// Returns the active workspace name (e.g., `"default"`, `"subagent_a"`)
+    /// for `workspace_root`.
     #[must_use]
     pub fn current_workspace_name(workspace_root: &Path) -> Option<String> {
         let mut cmd = Command::new("jj");
@@ -116,13 +118,15 @@ impl JujutsuWorkspace {
     /// Ensures an isolated Jujutsu workspace exists for the specified agent.
     ///
     /// Creates `.tkg/workspaces/<agent>` if it does not already exist.
-    /// If it already exists and is clean, automatically synchronizes it by branching
-    /// a new working copy commit off the latest `default@` revision.
-    /// Links `.tkg/workspaces/<agent>/target` to `<workspace_root>/target` to share build artifacts.
-    /// Returns the canonical path to the isolated workspace.
+    /// If it already exists and is clean, automatically synchronizes it by
+    /// branching a new working copy commit off the latest `default@` revision.
+    /// Links `.tkg/workspaces/<agent>/target` to `<workspace_root>/target` to
+    /// share build artifacts. Returns the canonical path to the isolated
+    /// workspace.
     ///
     /// # Errors
-    /// Returns `TkgError` if Jujutsu is not installed, not initialized, or workspace creation fails.
+    /// Returns `TkgError` if Jujutsu is not installed, not initialized, or
+    /// workspace creation fails.
     #[allow(
         clippy::print_stderr,
         reason = "Diagnostic advisories when Jujutsu or Git prerequisites are missing"
@@ -194,7 +198,8 @@ impl JujutsuWorkspace {
                 )));
             }
         } else if Self::is_workspace_clean(agent_ws_path) {
-            // Rebase clean workspace onto latest default@ commit to eliminate split-brain drift
+            // Rebase clean workspace onto latest default@ commit to eliminate
+            // split-brain drift
             let mut cmd = Command::new("jj");
             cmd.args(["--color=never", "new", "default@", "--no-edit"]);
             cmd.current_dir(agent_ws_path);
@@ -228,8 +233,13 @@ impl JujutsuWorkspace {
             if !ws_cache.exists() && root_cache.is_dir() {
                 #[cfg(unix)]
                 {
-                    if let Some(parent) = ws_cache.parent() {
-                        drop(std::fs::create_dir_all(parent));
+                    if let Some(parent) = ws_cache.parent()
+                        && let Err(e) = std::fs::create_dir_all(parent)
+                    {
+                        eprintln!(
+                            "[tkg-common] warning: failed to create cache parent directory {}: {e}",
+                            parent.display()
+                        );
                     }
                     if let Err(e) = std::os::unix::fs::symlink(&root_cache, &ws_cache)
                         && e.kind() != std::io::ErrorKind::AlreadyExists
@@ -312,10 +322,12 @@ impl JujutsuWorkspace {
         Ok(())
     }
 
-    /// Inspects the revisions and working-copy diff for an agent's isolated workspace.
+    /// Inspects the revisions and working-copy diff for an agent's isolated
+    /// workspace.
     ///
     /// # Errors
-    /// Returns `TkgError` if Jujutsu is not available or the workspace does not exist.
+    /// Returns `TkgError` if Jujutsu is not available or the workspace does not
+    /// exist.
     pub fn inspect_agent_workspace(workspace_root: &Path, agent: &str) -> Result<String> {
         if agent.is_empty()
             || agent.starts_with('-')
@@ -415,16 +427,21 @@ impl JujutsuWorkspace {
         Ok(output)
     }
 
-    /// Merges an agent's isolated workspace back into the main working tree `@`.
+    /// Merges an agent's isolated workspace back into the main working tree
+    /// `@`.
     ///
     /// 1. Snapshots starting VCS operation for rollback.
     /// 2. Snapshots subagent workspace working copy.
-    /// 3. Rebases subagent revision(s) onto `@` (or squashes into `@` if strategy is 'squash').
-    /// 4. Advances main working copy on top of rebased revision via `jj new <agent>@`.
+    /// 3. Rebases subagent revision(s) onto `@` (or squashes into `@` if
+    ///    strategy is 'squash').
+    /// 4. Advances main working copy on top of rebased revision via `jj new
+    ///    <agent>@`.
     /// 5. Verifies zero merge conflicts (`conflicts() & @::`).
-    /// 6. Evaluates declarative project quality gates (`project.toml`) on the merged tree.
+    /// 6. Evaluates declarative project quality gates (`project.toml`) on the
+    ///    merged tree.
     /// 7. On gate failure, restores starting VCS operation via `jj op restore`.
-    /// 8. On gate pass, cleans up the isolated workspace via `forget_agent_workspace`.
+    /// 8. On gate pass, cleans up the isolated workspace via
+    ///    `forget_agent_workspace`.
     ///
     /// # Errors
     /// Returns `TkgError` if rebase, conflicts, or quality gates fail.
@@ -576,7 +593,8 @@ impl JujutsuWorkspace {
 
     /// Collects working copy diff summary lines (e.g. `M src/main.rs`),
     /// filtered by `project.is_ignored_or_cache_path()`.
-    /// Executes under `SubprocessSupervisor` timeout to prevent hanging on locks.
+    /// Executes under `SubprocessSupervisor` timeout to prevent hanging on
+    /// locks.
     #[must_use]
     pub fn get_working_copy_diff_summary(
         root: &Path,
@@ -586,9 +604,10 @@ impl JujutsuWorkspace {
         lines.join("\n")
     }
 
-    /// Collects modified file paths in the working copy (via `jj diff --summary` or `git status -s`),
-    /// filtered by `project.is_ignored_or_cache_path()`.
-    /// Executes under `SubprocessSupervisor` timeout to prevent hanging on locks.
+    /// Collects modified file paths in the working copy (via `jj diff
+    /// --summary` or `git status -s`), filtered by
+    /// `project.is_ignored_or_cache_path()`. Executes under
+    /// `SubprocessSupervisor` timeout to prevent hanging on locks.
     #[must_use]
     pub fn get_modified_files(
         root: &Path,
@@ -613,7 +632,8 @@ impl JujutsuWorkspace {
         files
     }
 
-    /// Helper retrieving filtered raw status lines from Jujutsu or Git under supervision.
+    /// Helper retrieving filtered raw status lines from Jujutsu or Git under
+    /// supervision.
     fn get_working_copy_status_lines(
         root: &Path,
         project: &crate::project::ProjectConfig,
@@ -697,8 +717,8 @@ impl JujutsuWorkspace {
         "unknown".to_owned()
     }
 
-    /// Queries a human-readable working copy status summary (e.g. `"Clean"` or `"3 modified file(s)"`),
-    /// respecting `project.is_ignored_or_cache_path`.
+    /// Queries a human-readable working copy status summary (e.g. `"Clean"` or
+    /// `"3 modified file(s)"`), respecting `project.is_ignored_or_cache_path`.
     #[must_use]
     pub fn query_vcs_status_summary(root: &Path) -> String {
         let project = crate::project::ProjectConfig::detect_or_load(root);
@@ -746,14 +766,22 @@ impl JujutsuWorkspace {
     }
 }
 
+#[allow(
+    clippy::print_stderr,
+    reason = "Diagnostic logging for best-effort VCS snapshot"
+)]
 fn snapshot_workspace(ws_path: &Path) {
     let mut status_cmd = Command::new("jj");
     status_cmd.args(["--color=never", "status"]);
     status_cmd.current_dir(ws_path);
-    drop(SubprocessSupervisor::run_supervised(
-        status_cmd,
-        DEFAULT_VCS_QUERY_TIMEOUT_SECS,
-    ));
+    if let Err(err) =
+        SubprocessSupervisor::run_supervised(status_cmd, DEFAULT_VCS_QUERY_TIMEOUT_SECS)
+    {
+        eprintln!(
+            "[tkg-common] warning: failed to snapshot workspace {}: {err}",
+            ws_path.display()
+        );
+    }
 }
 
 fn query_current_op_id(repo_root: &Path) -> Option<String> {
@@ -781,15 +809,27 @@ fn query_current_op_id(repo_root: &Path) -> Option<String> {
         .filter(|id| !id.is_empty())
 }
 
+#[allow(
+    clippy::print_stderr,
+    reason = "Diagnostic logging for best-effort VCS rollback"
+)]
 fn restore_op(repo_root: &Path, op_id: Option<&str>) {
     if let Some(id) = op_id {
         let mut restore_cmd = Command::new("jj");
         restore_cmd.args(["--color=never", "op", "restore", id]);
         restore_cmd.current_dir(repo_root);
-        drop(SubprocessSupervisor::run_supervised(
-            restore_cmd,
-            DEFAULT_VCS_QUERY_TIMEOUT_SECS,
-        ));
+        match SubprocessSupervisor::run_supervised(restore_cmd, DEFAULT_VCS_QUERY_TIMEOUT_SECS) {
+            Ok(out) if !out.status.success() => {
+                eprintln!(
+                    "[tkg-common] warning: 'jj op restore {id}' failed: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+            },
+            Err(err) => {
+                eprintln!("[tkg-common] warning: failed to run 'jj op restore {id}': {err}");
+            },
+            Ok(_) => {},
+        }
     }
 }
 

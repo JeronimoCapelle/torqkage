@@ -357,7 +357,12 @@ fn ensure_binaries_executable(dest_bin: &Path) {
             {
                 let mut perms = meta.permissions();
                 perms.set_mode(0o755);
-                drop(std::fs::set_permissions(entry.path(), perms));
+                if let Err(err) = std::fs::set_permissions(entry.path(), perms) {
+                    eprintln!(
+                        "tkg: warning: failed to mark '{}' executable: {err}",
+                        entry.path().display()
+                    );
+                }
             }
         }
     }
@@ -436,14 +441,25 @@ pub(crate) fn install_plugin_interactive(
     // Stage fresh compiled binaries if they exist in workspace target
     // directories
     let dest_bin = dest.join("bin");
-    drop(std::fs::create_dir_all(&dest_bin));
+    std::fs::create_dir_all(&dest_bin).map_err(|err| {
+        format!(
+            "Failed to create plugin binary directory '{}': {err}",
+            dest_bin.display()
+        )
+    })?;
     for profile in ["release", "fast", "debug"] {
         let target_profile = workspace_root.join("target").join(profile);
         for bin_name in ["tkg-mcp", "tkg-hooks", "tkg"] {
             let candidate_bin = target_profile.join(bin_name);
             let target_file = dest_bin.join(bin_name);
             if candidate_bin.is_file() && !target_file.is_file() {
-                drop(std::fs::copy(&candidate_bin, &target_file));
+                std::fs::copy(&candidate_bin, &target_file).map_err(|err| {
+                    format!(
+                        "Failed to copy '{}' to '{}': {err}",
+                        candidate_bin.display(),
+                        target_file.display()
+                    )
+                })?;
             }
         }
     }

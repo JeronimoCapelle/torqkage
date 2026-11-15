@@ -1,4 +1,5 @@
-//! `file_search` action handler providing fast pattern and regex search across repository files.
+//! `file_search` action handler providing fast pattern and regex search across
+//! repository files.
 
 use std::path::Path;
 
@@ -30,7 +31,8 @@ fn build_search_matcher(
             .build(pattern)
             .map_err(|err| format!("Invalid search literal '{pattern}': {err}")),
         None => {
-            // Auto-compile as regex if valid; gracefully fallback to literal if regex syntax fails.
+            // Auto-compile as regex if valid; gracefully fallback to literal if
+            // regex syntax fails.
             builder.build(pattern).or_else(|_| {
                 builder
                     .fixed_strings(true)
@@ -43,13 +45,16 @@ fn build_search_matcher(
 
 /// Executes a bounded pattern search across files.
 ///
-/// If no explicit path is given, searches across all configured documentation paths
-/// in `project.toml` (e.g. `docs/`, `specs/`, `ARCHITECTURE.md`), or falls back to `tool.enforce_dir`.
+/// If no explicit path is given, searches across all configured documentation
+/// paths in `project.toml` (e.g. `docs/`, `specs/`, `ARCHITECTURE.md`), or
+/// falls back to `tool.enforce_dir`.
 ///
-/// Supports regular expressions via the `regex` crate and optional `is_regex` / `case_sensitive` parameters.
+/// Supports regular expressions via the `regex` crate and optional `is_regex` /
+/// `case_sensitive` parameters.
 ///
 /// # Errors
-/// Returns an error message if parameters are invalid, regex compilation fails, or search fails.
+/// Returns an error message if parameters are invalid, regex compilation fails,
+/// or search fails.
 pub(crate) fn execute(
     tool: &ToolDefinition,
     workspace_root: &Path,
@@ -236,7 +241,11 @@ fn search_single_file(
         .line_number(true)
         .build();
 
-    drop(searcher.search_path(
+    #[allow(
+        clippy::print_stderr,
+        reason = "Log non-fatal file search read errors instead of dropping silently"
+    )]
+    if let Err(err) = searcher.search_path(
         matcher,
         file_path,
         UTF8(|line_num, line| {
@@ -244,7 +253,12 @@ fn search_single_file(
             collected_matches.push(format!("{rel_path}:{line_num}: {trimmed}"));
             Ok(collected_matches.len() < MAX_SEARCH_MATCHES)
         }),
-    ));
+    ) {
+        eprintln!(
+            "[tkg-mcp] warning: failed searching '{}': {err}",
+            file_path.display()
+        );
+    }
 }
 
 fn is_path_ignored(rel_str: &str, ignored_paths: &[String]) -> bool {
@@ -467,7 +481,8 @@ mod tests {
             ..Default::default()
         };
 
-        // Valid regex passed without is_regex flag -> should auto-compile as regex
+        // Valid regex passed without is_regex flag -> should auto-compile as
+        // regex
         let args = json!({
             "pattern": "OPCODE_[A-Z]+"
         });
@@ -516,7 +531,8 @@ mod tests {
             ..Default::default()
         };
 
-        // Pattern has invalid regex syntax "unclosed(" but is_regex is omitted -> fallback to literal
+        // Pattern has invalid regex syntax "unclosed(" but is_regex is omitted
+        // -> fallback to literal
         let args = json!({
             "pattern": "unclosed("
         });
@@ -548,7 +564,8 @@ mod tests {
         let res_upper = execute(&tool, &temp, &args_upper).expect("case sensitive upper");
         assert!(res_upper.contains("UPPERCASE = 2;"));
 
-        // Case-sensitive search for lowercase (should match lowercase but not UPPERCASE)
+        // Case-sensitive search for lowercase (should match lowercase but not
+        // UPPERCASE)
         let args_lower = json!({
             "pattern": "lowercase",
             "case_sensitive": true
