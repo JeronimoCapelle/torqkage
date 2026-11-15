@@ -681,8 +681,8 @@ pub fn extract_compiler_error_signature(
     None
 }
 
-/// Extracts the first bracketed compiler error code (e.g., "[E0502]",
-/// "[syntax-error]") from compiler output.
+/// Extracts the first bracketed compiler error code (e.g., `"[E0502]"`,
+/// `"[syntax-error]"`) from compiler output.
 #[must_use]
 pub fn extract_bracketed_error_code(output: &str) -> Option<String> {
     for line in output.lines() {

@@ -61,10 +61,10 @@ jobs:
       - name: Install Rust toolchain (Stable)
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-deny and cargo-machete
+      - name: Install cargo-deny, cargo-machete, and typos
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny,cargo-machete
+          tool: cargo-deny,cargo-machete,typos-cli
 
       - name: Security, License & Banned Dependency Audit (cargo-deny)
         env:
@@ -74,6 +74,9 @@ jobs:
 
       - name: Unused Dependency Audit (cargo-machete)
         run: cargo machete
+
+      - name: Source Spellcheck (typos)
+        run: typos
 
   quality-gate:
     name: Build, Test & Lint
@@ -111,6 +114,11 @@ jobs:
 
       - name: Enforce strict pedantic linter clean rules (clippy)
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Verify Rustdoc generation with zero warnings
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps --all-features
 
       - name: Execute automated unit, property, and snapshot tests (nextest)
         run: cargo nextest run --workspace --profile ci

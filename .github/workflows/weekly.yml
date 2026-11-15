@@ -1,0 +1,19 @@
+name: Weekly Deep Audit
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  weekly-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-mutants,cargo-outdated
+      - run: cargo outdated --root-deps-only
+      - run: cargo mutants --config .cargo/mutants.toml --profile ci

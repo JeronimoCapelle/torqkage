@@ -180,10 +180,6 @@ where
     )
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Test injection helper preserves public-within-crate signature cleanly"
-)]
 fn execute_supervised_command_with_env<F, B>(
     program: &str,
     args: (&[String], &[String]),

@@ -1,0 +1,18 @@
+[files]
+extend-exclude = [
+    "target/**",
+    "Cargo.lock",
+    "crates/*/tests/snapshots/**",
+]
+
+[default.extend-words]
+torqkage = "torqkage"
+bwrap = "bwrap"
+jujutsu = "jujutsu"
+mpatch = "mpatch"
+ratatui = "ratatui"
+nextest = "nextest"
+rusqlite = "rusqlite"
+ungrouped = "ungrouped"
+flate = "flate"
+strat = "strat"
