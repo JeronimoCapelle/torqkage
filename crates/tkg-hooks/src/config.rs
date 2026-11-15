@@ -118,7 +118,8 @@ fn default_protected_patterns() -> Vec<String> {
     ]
 }
 
-/// Manifest mutation guard configuration protecting build files against host proc-macro execution escape.
+/// Manifest mutation guard configuration protecting build files against host
+/// proc-macro execution escape.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(crate) struct ManifestGuardConfig {
     #[serde(default = "default_true")]
@@ -270,35 +271,25 @@ pub(crate) struct HooksConfig {
 
 impl HooksConfig {
     /// Loads `hooks.toml` using harness-neutral hierarchical discovery
-    /// (see [`tkg_common::harness::config_file_candidates`]).
-    #[must_use]
-    pub(crate) fn load(workspace_root: &Path) -> Self {
-        if let Some(path) = tkg_common::harness::find_hooks_toml(workspace_root) {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => match parse_hooks_config(&content) {
-                    Ok(cfg) => return cfg,
-                    Err(err) => {
-                        eprintln!(
-                            "tkg-hooks: error: failed to parse hooks configuration at '{}': {err}",
-                            path.display()
-                        );
-                    },
-                },
-                Err(err) => {
-                    eprintln!(
-                        "tkg-hooks: warning: failed to read hooks configuration at '{}': {err}",
-                        path.display()
-                    );
-                },
-            }
-        }
-
-        Self::default()
+    /// (see [`tkg_common::harness::config_file_candidates`]), failing closed if
+    /// an on-disk `hooks.toml` cannot be read or contains syntax errors.
+    ///
+    /// # Errors
+    /// Returns [`tkg_common::TkgError::Io`] or
+    /// [`tkg_common::TkgError::ConfigParse`] if an existing `hooks.toml` fails
+    /// to read or parse. Returns `Ok(Self::default())` when no `hooks.toml`
+    /// exists in candidate locations.
+    pub(crate) fn try_load(workspace_root: &Path) -> tkg_common::Result<Self> {
+        let Some(path) = tkg_common::harness::find_hooks_toml(workspace_root) else {
+            return Ok(Self::default());
+        };
+        let content = std::fs::read_to_string(&path)?;
+        parse_hooks_config_with_path(Some(&path), &content)
     }
 }
 
-/// Matches a string against a pattern supporting wildcards (`*`), prefixes (`foo_.*`, `foo_*`),
-/// or pipe-separated choices (`a|b|c`).
+/// Matches a string against a pattern supporting wildcards (`*`), prefixes
+/// (`foo_.*`, `foo_*`), or pipe-separated choices (`a|b|c`).
 #[must_use]
 pub(crate) fn matches_pattern(text: &str, pattern: &str) -> bool {
     let p = pattern.trim();
@@ -321,12 +312,29 @@ pub(crate) fn matches_pattern(text: &str, pattern: &str) -> bool {
     false
 }
 
+/// Parses a `hooks.toml` string into a structured `HooksConfig` with
+/// path-aware line/column diagnostics on syntax error.
+///
+/// # Errors
+/// Returns [`tkg_common::TkgError::ConfigParse`] if deserialization fails.
+pub(crate) fn parse_hooks_config_with_path(
+    path: Option<&Path>,
+    content: &str,
+) -> tkg_common::Result<HooksConfig> {
+    toml::from_str(content).map_err(|err| tkg_common::TkgError::from_toml(path, content, &err))
+}
+
 /// Parses a `hooks.toml` string into a structured `HooksConfig`.
 ///
 /// # Errors
-/// Returns [`toml::de::Error`] if the content fails TOML deserialization.
-pub(crate) fn parse_hooks_config(content: &str) -> Result<HooksConfig, toml::de::Error> {
-    toml::from_str(content)
+/// Returns [`tkg_common::TkgError::ConfigParse`] if the content fails TOML
+/// deserialization.
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "Used directly in unit tests and inline callers")
+)]
+pub(crate) fn parse_hooks_config(content: &str) -> tkg_common::Result<HooksConfig> {
+    parse_hooks_config_with_path(None, content)
 }
 
 #[cfg(test)]
@@ -395,11 +403,11 @@ reason = "Disk is full"
 
     #[test]
     fn test_parse_hooks_config_syntax_error() {
-        let malformed = "this is not valid toml = [[";
-        let err = parse_hooks_config(malformed);
-        assert!(
-            err.is_err(),
-            "malformed toml must return Err rather than failing open"
-        );
+        let malformed = "[pre_tool_use]\npipeline = [[\n";
+        let err = parse_hooks_config(malformed).unwrap_err();
+        let rendered = err.to_string();
+        assert!(rendered.contains("at line 2, column"));
+        assert!(rendered.contains("2 | pipeline = [["));
+        assert!(rendered.contains('^'));
     }
 }

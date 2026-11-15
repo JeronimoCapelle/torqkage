@@ -136,7 +136,7 @@ fn test_detect_wip_consecutive_burns_zero_tokens_e2e() {
     let input_json = serde_json::to_string(&payload).expect("serialize payload");
 
     // First call
-    let (success1, _, _) = run_hook_subcommand("detect-wip", Some(&input_json));
+    let (success1, ..) = run_hook_subcommand("detect-wip", Some(&input_json));
     assert!(success1);
 
     // Immediate second call should be clean/unchanged -> burns 0 tokens ({})
@@ -227,7 +227,8 @@ fn test_claude_dialect_deny_returns_exit_code_2_e2e() {
         serde_json::from_str(&stdout_proto).expect("valid PreToolResponse");
     assert_eq!(resp.decision, tkg_common::HookDecision::Deny);
 
-    // Claude Code dialect: exit code 2, stderr diagnostics, hookSpecificOutput JSON
+    // Claude Code dialect: exit code 2, stderr diagnostics, hookSpecificOutput
+    // JSON
     let (code_claude, stdout_claude, stderr_claude) = run_hook_subcommand_with_env(
         "pre-tool-use",
         Some(&input_json),
@@ -241,6 +242,74 @@ fn test_claude_dialect_deny_returns_exit_code_2_e2e() {
             .and_then(serde_json::Value::as_str),
         Some("deny")
     );
+
+    std::fs::remove_dir_all(&ws).expect("cleanup");
+}
+
+#[test]
+fn test_corrupt_hooks_and_tools_toml_fail_closed_e2e() {
+    let ws = std::env::temp_dir().join(format!(
+        "tkg_corrupt_hooks_ws_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(ws.join(".tkg")).expect("create .tkg dir");
+    std::fs::write(
+        ws.join(".tkg/hooks.toml"),
+        "[pre_tool_use]\npipeline = [[\n",
+    )
+    .expect("write corrupt hooks.toml");
+
+    let payload = tkg_common::PreToolUseInput {
+        tool_call: Some(tkg_common::models::ToolCallPayload {
+            name: "read_file".to_owned(),
+            args: serde_json::json!({"path": "README.md"}),
+        }),
+        common: tkg_common::CommonHookPayload {
+            workspace_paths: vec![ws.clone()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let input_json = serde_json::to_string(&payload).expect("serialize payload");
+
+    let (code, stdout, stderr) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&input_json), &[]);
+    assert_ne!(
+        code,
+        Some(0),
+        "corrupt hooks.toml must fail closed with non-zero exit"
+    );
+    assert!(stderr.contains("at line 2, column"), "stderr: {stderr}");
+    let resp: tkg_common::PreToolResponse =
+        serde_json::from_str(&stdout).expect("valid PreToolResponse");
+    assert_eq!(resp.decision, tkg_common::HookDecision::Deny);
+
+    // Replace hooks.toml with valid config and corrupt tools.toml instead.
+    std::fs::remove_file(ws.join(".tkg/hooks.toml")).expect("remove hooks.toml");
+    std::fs::write(
+        ws.join(".tkg/tools.toml"),
+        "[tools.read_file]\nmutating = [[\n",
+    )
+    .expect("write corrupt tools.toml");
+
+    let (code_tools, stdout_tools, stderr_tools) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&input_json), &[]);
+    assert_ne!(
+        code_tools,
+        Some(0),
+        "corrupt tools.toml must fail closed with non-zero exit"
+    );
+    assert!(
+        stderr_tools.contains("at line 2, column"),
+        "stderr: {stderr_tools}"
+    );
+    let resp_tools: tkg_common::PreToolResponse =
+        serde_json::from_str(&stdout_tools).expect("valid PreToolResponse");
+    assert_eq!(resp_tools.decision, tkg_common::HookDecision::Deny);
 
     std::fs::remove_dir_all(&ws).expect("cleanup");
 }

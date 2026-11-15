@@ -17,34 +17,60 @@ pub(crate) fn execute() -> std::process::ExitCode {
     let input = stdin::read_pre_tool_use_input();
     let root = input.common.resolve_workspace_root();
 
-    let config = HooksConfig::load(&root);
-    let response = evaluate_pre_tool_use(&input, &root, &config);
+    let (response, is_config_error) = match HooksConfig::try_load(&root)
+        .and_then(|config| evaluate_pre_tool_use_checked(&input, &root, &config))
+    {
+        Ok(resp) => (resp, false),
+        Err(err) => {
+            eprintln!("tkg-hooks: {err}");
+            (
+                PreToolResponse::deny(format!("Configuration error (fail-closed): {err}")),
+                true,
+            )
+        },
+    };
 
     stdin::write_pre_tool_use_response(&response);
 
-    if response.decision == HookDecision::Deny && stdin::is_claude_harness_for_root(&root) {
-        if let Some(ref reason) = response.reason {
-            eprintln!("TorqKage policy violation: {reason}");
+    if response.decision == HookDecision::Deny {
+        if stdin::is_claude_harness_for_root(&root) {
+            if let Some(ref reason) = response.reason {
+                eprintln!("TorqKage policy violation: {reason}");
+            }
+            return std::process::ExitCode::from(2);
         }
-        std::process::ExitCode::from(2)
-    } else {
-        std::process::ExitCode::SUCCESS
+        if is_config_error {
+            return std::process::ExitCode::FAILURE;
+        }
     }
+    std::process::ExitCode::SUCCESS
 }
 
 /// Evaluates a tool invocation input against the configured hybrid pipeline.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn evaluate_pre_tool_use(
     input: &PreToolUseInput,
     root: &Path,
     config: &HooksConfig,
 ) -> PreToolResponse {
+    evaluate_pre_tool_use_checked(input, root, config).unwrap_or_else(|err| {
+        PreToolResponse::deny(format!("Configuration error (fail-closed): {err}"))
+    })
+}
+
+fn evaluate_pre_tool_use_checked(
+    input: &PreToolUseInput,
+    root: &Path,
+    config: &HooksConfig,
+) -> tkg_common::Result<PreToolResponse> {
+    let tools_cfg = policy_gate::ParsedToolsConfig::try_load(root)?;
+
     let Some(ref tc) = input.tool_call else {
-        return PreToolResponse::allow();
+        return Ok(PreToolResponse::allow());
     };
 
     let tool_name = tc.name.as_str();
-    let tools_cfg = policy_gate::ParsedToolsConfig::load(root);
 
     // 1. Evaluate native pipeline primitives in declared sequence
     for stage in &config.pre_tool_use.pipeline {
@@ -58,7 +84,7 @@ pub(crate) fn evaluate_pre_tool_use(
                     if (ledger.tripped || ledger.consecutive_failures >= ledger.max_strikes)
                         && tools_cfg.is_mutating(tool_name)
                     {
-                        return PreToolResponse::ask(format!(
+                        return Ok(PreToolResponse::ask(format!(
                             "🛑 CIRCUIT BREAKER TRIPPED ({} consecutive gate/verification failures):\n\
                              Last Error/Failure: {}\n\
                              Autonomous loop halted to prevent token burn and code regression.\n\
@@ -68,25 +94,25 @@ pub(crate) fn evaluate_pre_tool_use(
                                 .last_error_signature
                                 .as_deref()
                                 .unwrap_or("Verification error")
-                        ));
+                        )));
                     }
                 }
             },
             "manifest_guard" => {
                 if let Some(resp) = manifest_guard::evaluate_manifest_guard(input, root, config) {
-                    return resp;
+                    return Ok(resp);
                 }
             },
             "path_policies" => {
                 if let Some(resp) = evaluate_path_policies(input, root) {
-                    return resp;
+                    return Ok(resp);
                 }
             },
             "subagent_admission" => {
                 if tool_name == "invoke_subagent" {
                     let resp = subagent_gate::evaluate_tool_invocation(input);
                     if resp.decision != HookDecision::Allow {
-                        return resp;
+                        return Ok(resp);
                     }
                 }
             },
@@ -94,19 +120,19 @@ pub(crate) fn evaluate_pre_tool_use(
                 if tools_cfg.tool_requires_gate(tool_name, "vcs_conflicts")
                     && let Some(reason) = conflicts::detect_conflicts(root)
                 {
-                    return PreToolResponse::deny(reason);
+                    return Ok(PreToolResponse::deny(reason));
                 }
             },
             "tool_policy" => {
                 if tools_cfg.requires_permission_gate(tool_name) {
-                    return PreToolResponse::ask(format!(
+                    return Ok(PreToolResponse::ask(format!(
                         "Policy Gate: Tool '{tool_name}' requires interactive operator confirmation before execution."
-                    ));
+                    )));
                 }
                 if tools_cfg.is_mutating(tool_name) {
-                    return PreToolResponse::ask(format!(
+                    return Ok(PreToolResponse::ask(format!(
                         "Policy Gate: Tool '{tool_name}' applies automated filesystem or code modifications. Confirm execution?"
-                    ));
+                    )));
                 }
             },
             _ => {
@@ -121,11 +147,11 @@ pub(crate) fn evaluate_pre_tool_use(
             || (!check.matcher.is_empty() && matches_pattern(tool_name, &check.matcher));
 
         if matches && let Some(resp) = execute_custom_check(check, root) {
-            return resp;
+            return Ok(resp);
         }
     }
 
-    PreToolResponse::allow()
+    Ok(PreToolResponse::allow())
 }
 
 fn execute_custom_check(check: &CustomCheck, root: &Path) -> Option<PreToolResponse> {
@@ -174,7 +200,8 @@ fn resolve_active_agent(input: &PreToolUseInput, root: &Path) -> Option<String> 
     None
 }
 
-/// Evaluates agent directory boundary guards and path policies on mutating tool calls.
+/// Evaluates agent directory boundary guards and path policies on mutating tool
+/// calls.
 #[must_use]
 pub(crate) fn evaluate_path_policies(
     input: &PreToolUseInput,
@@ -358,7 +385,8 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
 "#,
         ));
 
-        // Verify policy_gate resolves category gates & skip_gates from tools.toml on disk
+        // Verify policy_gate resolves category gates & skip_gates from
+        // tools.toml on disk
         assert!(policy_gate::tool_requires_gate(
             "my_compiler",
             &temp_dir,

@@ -1,4 +1,5 @@
-//! Session state handoff recording (`Stop`) and wake-up injection (`SessionStart`).
+//! Session state handoff recording (`Stop`) and wake-up injection
+//! (`SessionStart`).
 
 use std::{fmt::Write, path::Path, process::Command};
 
@@ -10,19 +11,27 @@ use crate::stdin::{
 
 /// Executes the `record-handoff` hook (`Stop`).
 ///
-/// Captures working copy changes and active agent metadata, writing a Markdown summary
-/// to `.tkg/state/last_handoff.md` and structured JSON to `.tkg/state/handoff.json`.
-/// Emits `{}` on `stdout` permitting loop termination.
-pub(crate) fn execute_record_handoff() {
+/// Captures working copy changes and active agent metadata, writing a Markdown
+/// summary to `.tkg/state/last_handoff.md` and structured JSON to
+/// `.tkg/state/handoff.json`. Emits `{}` on `stdout` permitting loop
+/// termination.
+pub(crate) fn execute_record_handoff() -> std::process::ExitCode {
     let input = read_stop_input();
 
     let root = input.common.resolve_workspace_root();
-    let config = crate::config::HooksConfig::load(&root);
+    let config = match crate::config::HooksConfig::try_load(&root) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            eprintln!("tkg-hooks: {err}");
+            write_stop_response(&StopResponse::allow());
+            return std::process::ExitCode::FAILURE;
+        },
+    };
 
     if !config.stop.enabled || !config.stop.record_handoff {
         let resp = StopResponse::allow();
         write_stop_response(&resp);
-        return;
+        return std::process::ExitCode::SUCCESS;
     }
 
     let agent_name = tkg_common::resolve_active_agent(&root)
@@ -30,7 +39,7 @@ pub(crate) fn execute_record_handoff() {
         .unwrap_or_else(|| "agent".to_owned());
 
     let summary = format!("Session completed by agent '{agent_name}'.");
-    drop(tkg_common::handoff::record_session_handoff(
+    if let Err(err) = tkg_common::handoff::record_session_handoff(
         &root,
         &agent_name,
         None,
@@ -38,16 +47,20 @@ pub(crate) fn execute_record_handoff() {
         &[],
         "Auto",
         config.stop.max_modified_files,
-    ));
+    ) {
+        eprintln!("tkg-hooks: warning: failed to record session handoff: {err}");
+    }
 
     let resp = StopResponse::allow();
     write_stop_response(&resp);
+    std::process::ExitCode::SUCCESS
 }
 
 /// Executes the `inject-wake` hook (`SessionStart`).
 ///
-/// Reads `.tkg/state/handoff.json` (or `.tkg/state/last_handoff.md`) if present and emits a `systemMessage` step
-/// providing immediate continuity context for the starting conversation session.
+/// Reads `.tkg/state/handoff.json` (or `.tkg/state/last_handoff.md`) if present
+/// and emits a `systemMessage` step providing immediate continuity context for
+/// the starting conversation session.
 fn resolve_handoff_step(
     config: &crate::config::SessionStartConfig,
     root: &Path,
@@ -133,16 +146,23 @@ fn evaluate_custom_injections(
     }
 }
 
-pub(crate) fn execute_inject_wake() {
+pub(crate) fn execute_inject_wake() -> std::process::ExitCode {
     let input = read_session_start_input();
 
     let root = input.common.resolve_workspace_root();
-    let config = crate::config::HooksConfig::load(&root);
+    let config = match crate::config::HooksConfig::try_load(&root) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            eprintln!("tkg-hooks: {err}");
+            write_session_start_response(&SessionStartResponse::default());
+            return std::process::ExitCode::FAILURE;
+        },
+    };
 
     if !config.session_start.enabled {
         let resp = SessionStartResponse::default();
         write_session_start_response(&resp);
-        return;
+        return std::process::ExitCode::SUCCESS;
     }
 
     let paths = tkg_common::TkgStatePaths::new(&root);
@@ -162,6 +182,7 @@ pub(crate) fn execute_inject_wake() {
     );
 
     write_session_start_response(&resp);
+    std::process::ExitCode::SUCCESS
 }
 
 #[cfg(test)]

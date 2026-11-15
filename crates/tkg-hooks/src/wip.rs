@@ -9,13 +9,21 @@ use crate::stdin::{read_pre_invocation_input, write_pre_invocation_response};
 /// Executes the `detect-wip` hook.
 ///
 /// Computes an in-memory hash of `git status -s` or `jj diff --summary`.
-/// If files were modified on disk since the previous turn, emits a transient ephemeral notification.
-/// If unchanged or clean, emits `{}` burning zero tokens.
-pub(crate) fn execute() {
+/// If files were modified on disk since the previous turn, emits a transient
+/// ephemeral notification. If unchanged or clean, emits `{}` burning zero
+/// tokens.
+pub(crate) fn execute() -> std::process::ExitCode {
     let input = read_pre_invocation_input();
 
     let root = input.common.resolve_workspace_root();
-    let config = crate::config::HooksConfig::load(&root);
+    let config = match crate::config::HooksConfig::try_load(&root) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            eprintln!("tkg-hooks: {err}");
+            write_pre_invocation_response(&PreInvocationResponse::empty());
+            return std::process::ExitCode::FAILURE;
+        },
+    };
 
     let resp = if config.wip.enabled {
         detect_wip_changes(&root, input.common.conversation_id.as_deref(), &config)
@@ -24,6 +32,7 @@ pub(crate) fn execute() {
     };
 
     write_pre_invocation_response(&resp);
+    std::process::ExitCode::SUCCESS
 }
 
 fn detect_wip_changes(

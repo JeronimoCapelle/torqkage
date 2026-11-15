@@ -1,20 +1,29 @@
 //! # tkg-hooks
 //!
-//! Dedicated featherweight CLI binary (<500KB, <1ms startup) handling agent harness lifecycle events.
+//! Dedicated featherweight CLI binary (<500KB, <1ms startup) handling agent
+//! harness lifecycle events.
 //!
 //! ## Overview
-//! `tkg-hooks` is invoked ephemerally by the configured agent harness during lifecycle events
-//! (`PreInvocation`, `PreToolUse`, `PostToolUse`, `Stop`, `SessionStart`). It exchanges structured JSON
-//! payloads over `stdin`/`stdout` without background daemon overhead.
+//! `tkg-hooks` is invoked ephemerally by the configured agent harness during
+//! lifecycle events (`PreInvocation`, `PreToolUse`, `PostToolUse`, `Stop`,
+//! `SessionStart`). It exchanges structured JSON payloads over `stdin`/`stdout`
+//! without background daemon overhead.
 //!
 //! ## Subcommands
-//! - `pre-tool-use`: Unified hybrid `PreToolUse` hook evaluating `hooks.toml` pipeline (alias: `tool-use`).
-//! - `detect-wip`: Emits ephemeral notification on working tree modification; burns zero tokens if clean.
-//! - `check-conflicts`: Blocks builds and tests if unresolved Jujutsu or Git conflict markers exist.
-//! - `check-subagent`: Intercepts `invoke_subagent` and evaluates declared `pre_launch_checks`.
-//! - `enforce-tool-policy`: Enforces operator confirmation (`ask`) for mutating tools or tripped circuit breaker.
-//! - `record-handoff`: Captures session state and modified files to `.tkg/state/` upon session termination.
-//! - `inject-wake`: Injects prior handoff state into Turn 1 of new conversation sessions.
+//! - `pre-tool-use`: Unified hybrid `PreToolUse` hook evaluating `hooks.toml`
+//!   pipeline (alias: `tool-use`).
+//! - `detect-wip`: Emits ephemeral notification on working tree modification;
+//!   burns zero tokens if clean.
+//! - `check-conflicts`: Blocks builds and tests if unresolved Jujutsu or Git
+//!   conflict markers exist.
+//! - `check-subagent`: Intercepts `invoke_subagent` and evaluates declared
+//!   `pre_launch_checks`.
+//! - `enforce-tool-policy`: Enforces operator confirmation (`ask`) for mutating
+//!   tools or tripped circuit breaker.
+//! - `record-handoff`: Captures session state and modified files to
+//!   `.tkg/state/` upon session termination.
+//! - `inject-wake`: Injects prior handoff state into Turn 1 of new conversation
+//!   sessions.
 
 #![forbid(unsafe_code)]
 #![allow(
@@ -41,21 +50,12 @@ fn main() -> ExitCode {
 
     match command {
         "pre-tool-use" | "tool-use" => pre_tool_use::execute(),
-        "detect-wip" => {
-            wip::execute();
-            ExitCode::SUCCESS
-        },
+        "detect-wip" => wip::execute(),
         "check-conflicts" => conflicts::execute(),
         "check-subagent" => subagent_gate::execute(),
         "enforce-tool-policy" => policy_gate::execute(),
-        "record-handoff" => {
-            handoff::execute_record_handoff();
-            ExitCode::SUCCESS
-        },
-        "inject-wake" => {
-            handoff::execute_inject_wake();
-            ExitCode::SUCCESS
-        },
+        "record-handoff" => handoff::execute_record_handoff(),
+        "inject-wake" => handoff::execute_inject_wake(),
         "help" | "--help" | "-h" => {
             print_usage();
             ExitCode::SUCCESS

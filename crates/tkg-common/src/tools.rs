@@ -116,9 +116,9 @@ pub struct ToolSafetyPolicy {
 pub struct ToolSandboxPolicy {
     #[serde(default)]
     pub enforce_sandbox: bool,
-    /// When `true`, a tool with `enforce_sandbox` may run directly on the host if `bwrap` is
-    /// unavailable or cannot create namespaces *and* an outer sandbox/container is detected.
-    /// Defaults to `false` (fail closed).
+    /// When `true`, a tool with `enforce_sandbox` may run directly on the host
+    /// if `bwrap` is unavailable or cannot create namespaces *and* an outer
+    /// sandbox/container is detected. Defaults to `false` (fail closed).
     #[serde(default)]
     pub allow_host_fallback: bool,
     #[serde(default)]
@@ -145,7 +145,8 @@ const fn default_timeout_seconds() -> u64 {
     15
 }
 
-/// Raw representation of a tool entry parsed from TOML before inheritance resolution.
+/// Raw representation of a tool entry parsed from TOML before inheritance
+/// resolution.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawTool {
     pub inherit: Option<String>,
@@ -178,7 +179,8 @@ pub struct RawTool {
     pub success_exit_codes: Option<Vec<i32>>,
 }
 
-/// Configuration container holding base tools, category defaults, and resolved tools.
+/// Configuration container holding base tools, category defaults, and resolved
+/// tools.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawToolsConfig {
     #[serde(default)]
@@ -189,7 +191,8 @@ pub struct RawToolsConfig {
     pub tools: BTreeMap<String, RawTool>,
 }
 
-/// Fully-resolved declarative tool definition ready for JSON Schema generation and execution.
+/// Fully-resolved declarative tool definition ready for JSON Schema generation
+/// and execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ToolDefinition {
     pub name: String,
@@ -285,7 +288,8 @@ impl ToolDefinition {
         self.command.first().map(String::as_str)
     }
 
-    /// Evaluates whether this resolved tool requires the specified gate (case-insensitive).
+    /// Evaluates whether this resolved tool requires the specified gate
+    /// (case-insensitive).
     #[must_use]
     pub fn requires_gate(&self, gate_name: &str) -> bool {
         self.preconditions
@@ -399,7 +403,8 @@ fn resolve_preconditions(
     }
 }
 
-/// Merges a raw tool definition with its optional category defaults and base definition.
+/// Merges a raw tool definition with its optional category defaults and base
+/// definition.
 #[must_use]
 pub fn merge_tool_with_category(
     name: String,
@@ -480,8 +485,8 @@ pub fn merge_tool(name: String, base: Option<&RawTool>, raw: &RawTool) -> ToolDe
     merge_tool_with_category(name, None, base, raw)
 }
 
-/// Resolves inheritance for all tools defined in `RawToolsConfig`, merging category defaults,
-/// base tool templates, and concrete tool declarations.
+/// Resolves inheritance for all tools defined in `RawToolsConfig`, merging
+/// category defaults, base tool templates, and concrete tool declarations.
 #[must_use]
 pub fn resolve(config: &RawToolsConfig) -> Vec<ToolDefinition> {
     let mut resolved = Vec::with_capacity(config.tools.len());
@@ -507,27 +512,45 @@ pub fn resolve(config: &RawToolsConfig) -> Vec<ToolDefinition> {
 }
 
 impl RawToolsConfig {
+    /// Parses a `tools.toml` content string into a `RawToolsConfig`,
+    /// attaching `path` context and line/column caret diagnostics on error.
+    ///
+    /// # Errors
+    /// Returns [`crate::error::TkgError::ConfigParse`] if the content fails TOML
+    /// deserialization.
+    pub fn parse_with_path(
+        path: Option<&std::path::Path>,
+        content: &str,
+    ) -> Result<Self, crate::error::TkgError> {
+        toml::from_str(content)
+            .map_err(|err| crate::error::TkgError::from_toml(path, content, &err))
+    }
+
     /// Parses a `tools.toml` content string into a `RawToolsConfig`.
     ///
     /// # Errors
-    /// Returns a [`crate::error::TkgError`] if the content fails TOML deserialization.
+    /// Returns [`crate::error::TkgError::ConfigParse`] if the content fails TOML
+    /// deserialization.
     pub fn parse(content: &str) -> Result<Self, crate::error::TkgError> {
-        toml::from_str(content).map_err(crate::error::TkgError::from)
+        Self::parse_with_path(None, content)
     }
 
-    /// Parses a `tools.toml` content string into a `RawToolsConfig`, returning an empty config on parse error.
+    /// Parses a `tools.toml` content string into a `RawToolsConfig`, returning
+    /// an empty config on parse error.
     #[must_use]
     pub fn from_toml_str(content: &str) -> Self {
         Self::parse(content).unwrap_or_default()
     }
 
-    /// Loads and merges `tools.toml` configurations across all candidate directories for `root`.
-    #[must_use]
-    #[allow(
-        clippy::print_stderr,
-        reason = "Emits configuration parse diagnostics when loading tools.toml"
-    )]
-    pub fn load_merged(root: &std::path::Path) -> Self {
+    /// Loads and merges `tools.toml` configurations across all candidate
+    /// directories for `root`, failing closed if any existing file cannot be
+    /// read or parsed.
+    ///
+    /// # Errors
+    /// Returns [`crate::error::TkgError::Io`] or
+    /// [`crate::error::TkgError::ConfigParse`] when an on-disk `tools.toml`
+    /// fails to load or contains syntax errors.
+    pub fn try_load_merged(root: &std::path::Path) -> crate::Result<Self> {
         let ws_root =
             crate::WorkspaceResolver::find_root(Some(root)).unwrap_or_else(|_| root.to_path_buf());
         let runner = crate::harness::runner_for(root);
@@ -539,33 +562,47 @@ impl RawToolsConfig {
         }
 
         let mut merged = Self::default();
-        // Load in reverse order so higher-priority candidates overwrite lower-priority ones
+        // Load in reverse order so higher-priority candidates overwrite
+        // lower-priority ones
         for path in candidates.into_iter().rev() {
             if path.is_file() {
-                match std::fs::read_to_string(&path) {
-                    Ok(content) => match toml::from_str::<Self>(&content) {
-                        Ok(parsed) => {
-                            merged.tools.extend(parsed.tools);
-                            merged.base_tools.extend(parsed.base_tools);
-                            merged.categories.extend(parsed.categories);
-                        },
-                        Err(err) => {
-                            eprintln!(
-                                "tkg: error: failed to parse tool configuration at '{}': {err}",
-                                path.display()
-                            );
-                        },
-                    },
-                    Err(err) => {
-                        eprintln!(
-                            "tkg: warning: failed to read tool configuration at '{}': {err}",
-                            path.display()
-                        );
-                    },
-                }
+                let content = std::fs::read_to_string(&path)?;
+                let parsed = Self::parse_with_path(Some(&path), &content)?;
+                merged.tools.extend(parsed.tools);
+                merged.base_tools.extend(parsed.base_tools);
+                merged.categories.extend(parsed.categories);
             }
         }
-        merged
+        Ok(merged)
+    }
+
+    /// Loads and merges `tools.toml` configurations across all candidate
+    /// directories for `root`.
+    #[must_use]
+    #[allow(
+        clippy::print_stderr,
+        reason = "Emits configuration parse diagnostics when loading tools.toml"
+    )]
+    pub fn load_merged(root: &std::path::Path) -> Self {
+        Self::try_load_merged(root).unwrap_or_else(|err| {
+            eprintln!("tkg: error: {err}");
+            Self::default()
+        })
+    }
+
+    /// Loads, merges, and resolves all tool definitions indexed by tool name,
+    /// failing closed if any existing `tools.toml` cannot be read or parsed.
+    ///
+    /// # Errors
+    /// Returns an error if reading or parsing any candidate `tools.toml` fails.
+    pub fn try_load_resolved_map(
+        root: &std::path::Path,
+    ) -> crate::Result<crate::FastHashMap<String, ToolDefinition>> {
+        let raw = Self::try_load_merged(root)?;
+        Ok(resolve(&raw)
+            .into_iter()
+            .map(|t| (t.name.clone(), t))
+            .collect())
     }
 
     /// Loads, merges, and resolves all tool definitions indexed by tool name.
@@ -672,11 +709,34 @@ mod tests {
 
     #[test]
     fn test_raw_tools_config_parse_syntax_error() {
-        let malformed = "this is not valid toml = [[";
-        let err = RawToolsConfig::parse(malformed);
-        assert!(
-            err.is_err(),
-            "malformed toml must return Err rather than failing open"
-        );
+        let malformed = "[tools.demo]\ndescription = \"ok\"\ncap = [[";
+        let err = RawToolsConfig::parse(malformed).unwrap_err();
+        let rendered = err.to_string();
+        assert!(rendered.contains("at line 3, column"));
+        assert!(rendered.contains("3 | cap = [["));
+        assert!(rendered.contains('^'));
+        assert!(matches!(err, crate::error::TkgError::ConfigParse { .. }));
+    }
+
+    #[test]
+    fn test_try_load_merged_fails_closed_on_malformed_tools_toml() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tkg_tools_fail_closed_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let cfg_dir = temp_dir.join(".tkg");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        let corrupt = cfg_dir.join("tools.toml");
+        std::fs::write(&corrupt, "[tools.bad]\nbroken = [[\n").unwrap();
+
+        let err = RawToolsConfig::try_load_merged(&temp_dir).unwrap_err();
+        let rendered = err.to_string();
+        assert!(rendered.contains("tools.toml"));
+        assert!(rendered.contains("at line 2, column"));
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

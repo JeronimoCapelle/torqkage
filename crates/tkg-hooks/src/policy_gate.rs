@@ -11,46 +11,71 @@ use crate::stdin;
 
 /// Executes the `enforce-tool-policy` command.
 ///
-/// Inspects incoming `PreToolUseInput` on `stdin`. Evaluates whether the requested tool
-/// requires human confirmation (`ask`) or is authorized for autonomous execution (`allow`).
+/// Inspects incoming `PreToolUseInput` on `stdin`. Evaluates whether the
+/// requested tool requires human confirmation (`ask`) or is authorized for
+/// autonomous execution (`allow`).
 pub(crate) fn execute() -> std::process::ExitCode {
     let input = stdin::read_pre_tool_use_input();
     let root = input.common.resolve_workspace_root();
 
-    let response = evaluate_policy(&input, &root);
+    let (response, is_config_error) = match evaluate_policy_checked(&input, &root) {
+        Ok(resp) => (resp, false),
+        Err(err) => {
+            eprintln!("tkg-hooks: {err}");
+            (
+                PreToolResponse::deny(format!("Configuration error (fail-closed): {err}")),
+                true,
+            )
+        },
+    };
     stdin::write_pre_tool_use_response(&response);
 
-    if response.decision == tkg_common::HookDecision::Deny
-        && stdin::is_claude_harness_for_root(&root)
-    {
-        if let Some(ref reason) = response.reason {
-            eprintln!("TorqKage policy violation: {reason}");
+    if response.decision == tkg_common::HookDecision::Deny {
+        if stdin::is_claude_harness_for_root(&root) {
+            if let Some(ref reason) = response.reason {
+                eprintln!("TorqKage policy violation: {reason}");
+            }
+            return std::process::ExitCode::from(2);
         }
-        std::process::ExitCode::from(2)
-    } else {
-        std::process::ExitCode::SUCCESS
+        if is_config_error {
+            return std::process::ExitCode::FAILURE;
+        }
     }
+    std::process::ExitCode::SUCCESS
 }
 
-/// Evaluates a tool call against the granular security policy.
+/// Evaluates a tool call against the granular security policy, failing closed
+/// if configuration files cannot be parsed.
+#[cfg_attr(not(test), allow(dead_code, reason = "Used directly in unit tests"))]
 pub(crate) fn evaluate_policy(input: &PreToolUseInput, root: &Path) -> PreToolResponse {
+    evaluate_policy_checked(input, root).unwrap_or_else(|err| {
+        PreToolResponse::deny(format!("Configuration error (fail-closed): {err}"))
+    })
+}
+
+fn evaluate_policy_checked(
+    input: &PreToolUseInput,
+    root: &Path,
+) -> tkg_common::Result<PreToolResponse> {
+    let tools_cfg = ParsedToolsConfig::try_load(root)?;
+    let hooks_cfg = crate::config::HooksConfig::try_load(root)?;
+
     let Some(ref tc) = input.tool_call else {
-        return PreToolResponse::allow();
+        return Ok(PreToolResponse::allow());
     };
 
     let tool_name = tc.name.as_str();
-    let tools_cfg = ParsedToolsConfig::load(root);
 
-    // 0. Circuit Breaker Sentry: If consecutive failures exceed threshold, all mutating tools require explicit confirmation
+    // 0. Circuit Breaker Sentry: If consecutive failures exceed threshold, all
+    //    mutating tools require explicit confirmation
     let mut ledger = CircuitBreakerLedger::load(root);
-    let hooks_cfg = crate::config::HooksConfig::load(root);
     if hooks_cfg.circuit_breaker.max_strikes > 0 {
         ledger.max_strikes = hooks_cfg.circuit_breaker.max_strikes;
     }
     if (ledger.tripped || ledger.consecutive_failures >= ledger.max_strikes)
         && tools_cfg.is_mutating(tool_name)
     {
-        return PreToolResponse::ask(format!(
+        return Ok(PreToolResponse::ask(format!(
             "🛑 CIRCUIT BREAKER TRIPPED ({} consecutive gate/verification failures):\n\
              Last Error/Failure: {}\n\
              Autonomous loop halted to prevent token burn and code regression.\n\
@@ -60,35 +85,38 @@ pub(crate) fn evaluate_policy(input: &PreToolUseInput, root: &Path) -> PreToolRe
                 .last_error_signature
                 .as_deref()
                 .unwrap_or("Verification error")
-        ));
+        )));
     }
 
-    // 1. Check if tool is explicitly declared as requiring permission in tools.toml
+    // 1. Check if tool is explicitly declared as requiring permission in
+    //    tools.toml
     if tools_cfg.requires_permission_gate(tool_name) {
-        return PreToolResponse::ask(format!(
+        return Ok(PreToolResponse::ask(format!(
             "Policy Gate: Tool '{tool_name}' requires interactive operator confirmation before execution."
-        ));
+        )));
     }
 
     // 2. Mutating tools that alter source code or repository manifests
     if tools_cfg.is_mutating(tool_name) {
-        return PreToolResponse::ask(format!(
+        return Ok(PreToolResponse::ask(format!(
             "Policy Gate: Tool '{tool_name}' applies automated filesystem or code modifications. Confirm execution?"
-        ));
+        )));
     }
 
     // 3. All other verification and inspection tools are allowed autonomously
-    PreToolResponse::allow()
+    Ok(PreToolResponse::allow())
 }
 
-/// Resolved map of tool definitions loaded from `tools.toml` via [`tkg_common::tools`].
+/// Resolved map of tool definitions loaded from `tools.toml` via
+/// [`tkg_common::tools`].
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ParsedToolsConfig {
     pub(crate) tools: FastHashMap<String, ToolDefinition>,
 }
 
 impl ParsedToolsConfig {
-    /// Parses and resolves a `tools.toml` content string into structured tool definitions.
+    /// Parses and resolves a `tools.toml` content string into structured tool
+    /// definitions.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn from_str(content: &str) -> Self {
@@ -100,7 +128,21 @@ impl ParsedToolsConfig {
         Self { tools }
     }
 
-    /// Loads, merges, and resolves `tools.toml` configuration across candidate locations.
+    /// Loads, merges, and resolves `tools.toml` configuration across candidate
+    /// locations, failing closed on read or syntax errors.
+    ///
+    /// # Errors
+    /// Returns [`tkg_common::TkgError`] if any candidate `tools.toml` cannot be
+    /// read or fails TOML parsing.
+    pub(crate) fn try_load(root: &Path) -> tkg_common::Result<Self> {
+        Ok(Self {
+            tools: RawToolsConfig::try_load_resolved_map(root)?,
+        })
+    }
+
+    /// Loads, merges, and resolves `tools.toml` configuration across candidate
+    /// locations.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn load(root: &Path) -> Self {
         Self {
@@ -124,7 +166,8 @@ impl ParsedToolsConfig {
             .is_some_and(ToolDefinition::require_permission_gate)
     }
 
-    /// Checks if a tool resolves a boolean attribute to true across concrete, base, and category tiers.
+    /// Checks if a tool resolves a boolean attribute to true across concrete,
+    /// base, and category tiers.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn is_tool_attribute(&self, tool_name: &str, attr: &str) -> bool {
@@ -139,7 +182,8 @@ impl ParsedToolsConfig {
         }
     }
 
-    /// Evaluates whether a tool requires a specific gate after category inheritance and skip filtering.
+    /// Evaluates whether a tool requires a specific gate after category
+    /// inheritance and skip filtering.
     #[must_use]
     pub(crate) fn tool_requires_gate(&self, tool_name: &str, gate_name: &str) -> bool {
         self.tools
@@ -148,9 +192,10 @@ impl ParsedToolsConfig {
     }
 }
 
-/// Checks whether a tool is declared as a mutating tool in declarative configuration.
+/// Checks whether a tool is declared as a mutating tool in declarative
+/// configuration, failing closed (`true`) if `tools.toml` cannot be parsed.
 pub(crate) fn is_mutating_tool(tool_name: &str, root: &Path) -> bool {
-    ParsedToolsConfig::load(root).is_mutating(tool_name)
+    ParsedToolsConfig::try_load(root).map_or(true, |cfg| cfg.is_mutating(tool_name))
 }
 
 /// Evaluates whether a tool requires a specific gate before execution.
@@ -335,7 +380,8 @@ action = "file_read"
 "#;
         let config = ParsedToolsConfig::from_str(sample);
 
-        // Tool 1: clippy inherits category "compilation" from base_tools.cargo_runner
+        // Tool 1: clippy inherits category "compilation" from
+        // base_tools.cargo_runner
         assert!(config.is_tool_attribute("clippy", "tracks_circuit_breaker"));
         assert!(config.tool_requires_gate("clippy", "vcs_conflicts"));
         assert!(config.tool_requires_gate("clippy", "custom_lint"));

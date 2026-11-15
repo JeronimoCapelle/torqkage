@@ -13,11 +13,18 @@ pub(crate) struct LoadedConfiguration {
 /// Parses and resolves tools defined in a `tools.toml` string.
 ///
 /// # Errors
-/// Returns an error if the TOML syntax is invalid.
-pub(crate) fn parse_full_config_str(
+/// Returns a [`tkg_common::TkgError`] with line/column diagnostics if the
+/// TOML syntax is invalid.
+#[cfg(test)]
+pub(crate) fn parse_full_config_str(toml_str: &str) -> tkg_common::Result<LoadedConfiguration> {
+    parse_full_config_with_path(None, toml_str)
+}
+
+fn parse_full_config_with_path(
+    path: Option<&Path>,
     toml_str: &str,
-) -> Result<LoadedConfiguration, toml::de::Error> {
-    let raw: RawToolsConfig = toml::from_str(toml_str)?;
+) -> tkg_common::Result<LoadedConfiguration> {
+    let raw = RawToolsConfig::parse_with_path(path, toml_str)?;
     let resolved_tools = resolve(&raw);
 
     Ok(LoadedConfiguration {
@@ -37,12 +44,7 @@ pub(crate) fn load_full_config_from_path(path: &Path) -> Result<LoadedConfigurat
         )
     })?;
 
-    parse_full_config_str(&content).map_err(|err| {
-        format!(
-            "Failed to parse tools configuration at '{}': {err}",
-            path.display()
-        )
-    })
+    parse_full_config_with_path(Some(path), &content).map_err(|err| err.to_string())
 }
 
 #[cfg(test)]
@@ -99,5 +101,15 @@ mod tests {
             check_tool.command,
             vec!["echo".to_owned(), "check".to_owned()]
         );
+    }
+
+    #[test]
+    fn test_corrupt_tools_toml_emits_line_and_caret_diagnostics() {
+        let malformed = "[tools.demo]\ndescription = \"ok\"\nbad_field = [[\n";
+        let err = parse_full_config_str(malformed).unwrap_err();
+        let rendered = err.to_string();
+        assert!(rendered.contains("at line 3, column"));
+        assert!(rendered.contains("3 | bad_field = [["));
+        assert!(rendered.contains('^'));
     }
 }
