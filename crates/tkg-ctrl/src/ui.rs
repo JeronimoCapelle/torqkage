@@ -494,7 +494,7 @@ fn draw_agent_tool_preview(frame: &mut Frame<'_>, app: &App, area: Rect) {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        format!("  [Category: {}]", tool.category.label()),
+                        format!("  [Category: {}]", tool.category),
                         Style::default().fg(Color::Yellow),
                     ),
                 ]),
@@ -692,7 +692,7 @@ fn draw_tool_catalog_details(frame: &mut Frame<'_>, app: &App, area: Rect) {
             Span::styled("Action Engine:   ", Style::default().fg(Color::DarkGray)),
             Span::styled(&tool.action, Style::default().fg(Color::Yellow)),
             Span::styled("  [Category: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(tool.category.label(), Style::default().fg(Color::Magenta)),
+            Span::styled(&tool.category, Style::default().fg(Color::Magenta)),
             Span::styled("]", Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(""),

@@ -14,80 +14,8 @@ use tkg_common::{
     },
 };
 
-/// Category of an MCP tool for filtering and visual grouping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum ToolCategory {
-    /// Compilation & code verification (compilers, linters, formatters)
-    Compilation,
-    /// Automated testing, coverage & fuzzing (`test`, `coverage`, `mutants`,
-    /// `fuzz`)
-    Testing,
-    /// Hardware performance, microarchitecture, benchmarks & profiling (`asm`,
-    /// `perf`, `flamegraph`)
-    Profiling,
-    /// Transactional, bounded filesystem operations (`read_project_file`,
-    /// `mpatch`)
-    Filesystem,
-    /// Supply-chain, licensing, `SemVer` & changelog auditing (`licenses`,
-    /// `semver`)
-    Release,
-    /// Repository state, static analysis, specs & manuals (`ast_grep`,
-    /// `graphtrail`, `tldr`)
-    Diagnostics,
-    /// Documentation generation, markdown and spec queries (`cargo_doc`,
-    /// `git_cliff`)
-    Documentation,
-    /// Version control operations (`jj diff`, `jj absorb`, `git status`)
-    Vcs,
-    /// Isolated subagent workspaces (`ensure_agent_workspace`,
-    /// `merge_agent_workspace`)
-    Workspace,
-    /// System health, supervisor and circuit breaker controls
-    /// (`inspect_breaker`, `reset_breaker`)
-    Management,
-    /// Uncategorized / custom
-    Other,
-}
-
-impl ToolCategory {
-    /// Returns the human-readable display label.
-    #[must_use]
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Compilation => "Compilation & Lints",
-            Self::Testing => "Testing & Verification",
-            Self::Profiling => "Hardware & Profiling",
-            Self::Filesystem => "Filesystem & Edit",
-            Self::Release => "Release & SemVer",
-            Self::Diagnostics => "State & Diagnostics",
-            Self::Documentation => "Documentation & Specs",
-            Self::Vcs => "Version Control (JJ/Git)",
-            Self::Workspace => "Subagent Workspaces",
-            Self::Management => "Supervisor & Circuit Breaker",
-            Self::Other => "General",
-        }
-    }
-}
-
-impl std::str::FromStr for ToolCategory {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "compilation" => Ok(Self::Compilation),
-            "testing" => Ok(Self::Testing),
-            "profiling" => Ok(Self::Profiling),
-            "filesystem" => Ok(Self::Filesystem),
-            "release" => Ok(Self::Release),
-            "diagnostics" => Ok(Self::Diagnostics),
-            "documentation" => Ok(Self::Documentation),
-            "vcs" => Ok(Self::Vcs),
-            "workspace" => Ok(Self::Workspace),
-            "management" => Ok(Self::Management),
-            _ => Ok(Self::Other),
-        }
-    }
-}
+/// Fallback category label when a tool omits `category` in `tools.toml`.
+pub(crate) const DEFAULT_TOOL_CATEGORY: &str = "Tools";
 
 /// In-memory representation of an MCP tool loaded from `tools.toml`.
 #[derive(Debug, Clone)]
@@ -95,7 +23,7 @@ pub(crate) struct ToolItem {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) action: String,
-    pub(crate) category: ToolCategory,
+    pub(crate) category: String,
     pub(crate) safety: ToolSafetyPolicy,
     pub(crate) sandbox: ToolSandboxPolicy,
     pub(crate) preconditions: ToolPreconditions,
@@ -113,8 +41,9 @@ impl ToolItem {
         let category = def
             .category
             .as_deref()
-            .and_then(|c| c.parse().ok())
-            .unwrap_or_else(|| Self::infer_category(&def.name));
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map_or_else(|| DEFAULT_TOOL_CATEGORY.to_owned(), ToOwned::to_owned);
 
         Self {
             name: def.name,
@@ -179,88 +108,6 @@ impl ToolItem {
     #[must_use]
     pub(crate) const fn emit_truncation_notice(&self) -> bool {
         self.formatting.emit_truncation_notice
-    }
-
-    /// Infers the logical category based on the tool name and action using
-    /// generic semantic keywords.
-    #[must_use]
-    pub(crate) fn infer_category(name: &str) -> ToolCategory {
-        let n = name.to_ascii_lowercase();
-        if n.contains("test")
-            || n.contains("fuzz")
-            || n.contains("mutation")
-            || n.contains("mutant")
-            || n.contains("insta")
-        {
-            ToolCategory::Testing
-        } else if n.contains("bench")
-            || n.contains("profile")
-            || n.contains("perf")
-            || n.contains("bloat")
-            || n.contains("flamegraph")
-            || n.contains("hyperfine")
-            || n.contains("asm")
-            || n.contains("llvm")
-            || n.contains("miri")
-            || n.contains("careful")
-        {
-            ToolCategory::Profiling
-        } else if n.contains("check")
-            || n.contains("build")
-            || n.contains("compile")
-            || n.contains("clippy")
-            || n.contains("lint")
-            || n.contains("fmt")
-            || n.contains("expand")
-            || n.contains("verification")
-        {
-            ToolCategory::Compilation
-        } else if n.contains("workspace") {
-            ToolCategory::Workspace
-        } else if n.contains("breaker") {
-            ToolCategory::Management
-        } else if n.contains("diff")
-            || n.contains("bookmark")
-            || n.contains("absorb")
-            || n.contains("describe")
-            || n.contains("vcs")
-        {
-            ToolCategory::Vcs
-        } else if n.contains("doc")
-            || n.contains("cliff")
-            || n.contains("_spec")
-            || n.starts_with("spec")
-        {
-            ToolCategory::Documentation
-        } else if n.contains("release")
-            || n.contains("deny")
-            || n.contains("semver")
-            || n.contains("publish")
-            || n.contains("machete")
-            || n.contains("outdated")
-            || n.contains("public_api")
-            || n.contains("hack")
-        {
-            ToolCategory::Release
-        } else if n.contains("search")
-            || n.contains("read")
-            || n.contains("write")
-            || n.contains("modify")
-            || n.contains("patch")
-        {
-            ToolCategory::Filesystem
-        } else if n.contains("inspect")
-            || n.contains("query")
-            || n.contains("explain")
-            || n.contains("status")
-            || n.contains("math")
-            || n.contains("grep")
-            || n.contains("log")
-        {
-            ToolCategory::Diagnostics
-        } else {
-            ToolCategory::Other
-        }
     }
 }
 
@@ -505,39 +352,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tool_category_inference() {
+    fn test_declarative_tool_category_is_language_agnostic() {
+        let make_tool = |name: &str, category: Option<&str>| {
+            ToolItem::from_definition(ToolDefinition {
+                name: name.to_owned(),
+                category: category.map(ToOwned::to_owned),
+                ..Default::default()
+            })
+        };
+
+        assert_eq!(make_tool("pytest", Some("Test")).category, "Test");
+        assert_eq!(make_tool("ruff", Some("Linter")).category, "Linter");
         assert_eq!(
-            ToolItem::infer_category("cargo_clippy"),
-            ToolCategory::Compilation
+            make_tool("golangci_lint", Some("  Audit  ")).category,
+            "Audit"
         );
-        assert_eq!(
-            ToolItem::infer_category("cargo_nextest"),
-            ToolCategory::Testing
-        );
-        assert_eq!(
-            ToolItem::infer_category("llvm_mca"),
-            ToolCategory::Profiling
-        );
-        assert_eq!(
-            ToolItem::infer_category("write_file"),
-            ToolCategory::Filesystem
-        );
-        assert_eq!(
-            ToolItem::infer_category("modify_code"),
-            ToolCategory::Filesystem
-        );
-        assert_eq!(
-            ToolItem::infer_category("cargo_deny"),
-            ToolCategory::Release
-        );
-        assert_eq!(
-            ToolItem::infer_category("inspect_project_state"),
-            ToolCategory::Diagnostics
-        );
-        assert_eq!(
-            ToolItem::infer_category("unknown_custom_tool"),
-            ToolCategory::Other
-        );
+        assert_eq!(make_tool("mypy", Some("types")).category, "types");
+        // Omitted or blank categories fall back cleanly to "Tools" without Rust heuristics
+        assert_eq!(make_tool("cargo_clippy", None).category, "Tools");
+        assert_eq!(make_tool("custom_tool", Some("   ")).category, "Tools");
     }
 
     #[test]

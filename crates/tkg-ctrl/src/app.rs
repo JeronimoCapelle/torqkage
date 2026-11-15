@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use crate::{
     model::{
-        AgentManifest, ToolCategory, ToolItem, discover_agents, find_tools_config_path,
-        load_tools_from_file, update_tool_permission_gate_in_file,
+        AgentManifest, ToolItem, discover_agents, find_tools_config_path, load_tools_from_file,
+        update_tool_permission_gate_in_file,
     },
     vcs::{
         rollback_agent_file, run_plugin_install, run_plugin_validation, save_agent_to_disk,
@@ -65,7 +65,7 @@ pub(crate) struct App {
     pub(crate) fleet_focus: FleetFocus,
     pub(crate) selected_agent_idx: usize,
     pub(crate) selected_tool_idx: usize,
-    pub(crate) selected_category: Option<ToolCategory>,
+    pub(crate) selected_category: Option<String>,
     pub(crate) directives_scroll: u16,
     pub(crate) manual_scroll: u16,
     pub(crate) previous_tab: Option<ActiveTab>,
@@ -321,9 +321,12 @@ impl App {
     pub(crate) fn active_tool_count(&self) -> usize {
         match self.active_tab {
             ActiveTab::FleetOverview => self.tools.len(),
-            ActiveTab::ToolCatalog => self.selected_category.map_or(self.tools.len(), |cat| {
-                self.tools.iter().filter(|t| t.category == cat).count()
-            }),
+            ActiveTab::ToolCatalog => self
+                .selected_category
+                .as_deref()
+                .map_or(self.tools.len(), |cat| {
+                    self.tools.iter().filter(|t| t.category == cat).count()
+                }),
             ActiveTab::DirectivesEditor | ActiveTab::Manual => 0,
         }
     }
@@ -333,7 +336,7 @@ impl App {
     pub(crate) fn current_highlighted_tool(&self) -> Option<&ToolItem> {
         match self.active_tab {
             ActiveTab::FleetOverview => self.tools.get(self.selected_tool_idx),
-            ActiveTab::ToolCatalog => self.selected_category.map_or_else(
+            ActiveTab::ToolCatalog => self.selected_category.as_deref().map_or_else(
                 || self.tools.get(self.selected_tool_idx),
                 |cat| {
                     self.tools
@@ -353,8 +356,11 @@ impl App {
         match self.active_tab {
             ActiveTab::FleetOverview => self.tools.get_mut(idx),
             ActiveTab::ToolCatalog => {
-                if let Some(cat) = self.selected_category {
-                    self.tools.iter_mut().filter(|t| t.category == cat).nth(idx)
+                if let Some(ref cat) = self.selected_category {
+                    self.tools
+                        .iter_mut()
+                        .filter(|t| &t.category == cat)
+                        .nth(idx)
                 } else {
                     self.tools.get_mut(idx)
                 }
