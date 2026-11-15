@@ -107,8 +107,73 @@ pub struct ToolSafetyPolicy {
     pub require_permission_gate: bool,
 }
 
-/// Sandbox and filesystem confinement boundaries.
+/// Sandbox runtime backend declared via `[tools.<name>.sandbox]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxEngine {
+    #[default]
+    Bwrap,
+    None,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+/// Granular sandbox capabilities (`[tools.<name>.sandbox]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxProfile {
+    #[serde(default)]
+    pub engine: SandboxEngine,
+    #[serde(default)]
+    pub allow_network: bool,
+    #[serde(default = "default_true")]
+    pub unshare_pid: bool,
+    #[serde(default)]
+    pub read_only_binds: Vec<String>,
+    #[serde(default)]
+    pub writable_binds: Vec<String>,
+    #[serde(default)]
+    pub env_passthrough: Vec<String>,
+}
+
+impl Default for SandboxProfile {
+    fn default() -> Self {
+        Self {
+            engine: SandboxEngine::Bwrap,
+            allow_network: false,
+            unshare_pid: true,
+            read_only_binds: Vec::new(),
+            writable_binds: Vec::new(),
+            env_passthrough: Vec::new(),
+        }
+    }
+}
+
+/// Raw optional sandbox profile table before inheritance resolution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RawSandboxProfile {
+    pub engine: Option<SandboxEngine>,
+    pub enforce_sandbox: Option<bool>,
+    pub allow_host_fallback: Option<bool>,
+    pub allow_network: Option<bool>,
+    pub unshare_pid: Option<bool>,
+    pub read_only_binds: Option<Vec<String>>,
+    pub writable_binds: Option<Vec<String>>,
+    pub env_passthrough: Option<Vec<String>>,
+}
+
+/// Accepts either legacy boolean (`sandbox = true`) or a granular table
+/// (`[tools.<name>.sandbox]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SandboxDecl {
+    Bool(bool),
+    Profile(Box<RawSandboxProfile>),
+}
+
+/// Sandbox and filesystem confinement boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ToolSandboxPolicy {
     #[serde(default)]
     pub enforce_sandbox: bool,
@@ -121,6 +186,16 @@ pub struct ToolSandboxPolicy {
     pub enforce_workspace_bounds: bool,
     #[serde(default)]
     pub ban_dangerous_files: bool,
+    #[serde(default)]
+    pub profile: SandboxProfile,
+}
+
+impl ToolSandboxPolicy {
+    /// Returns `true` when sandboxing is enforced and `engine != "none"`.
+    #[must_use]
+    pub const fn effective_enforce_sandbox(&self) -> bool {
+        self.enforce_sandbox && !matches!(self.profile.engine, SandboxEngine::None)
+    }
 }
 
 /// Preconditions required before tool execution.
@@ -167,7 +242,7 @@ pub struct RawTool {
     pub require_permission_gate: Option<bool>,
     pub enforce_sandbox: Option<bool>,
     pub allow_host_fallback: Option<bool>,
-    pub sandbox: Option<bool>,
+    pub sandbox: Option<SandboxDecl>,
     pub require_gates: Option<Vec<String>>,
     pub skip_gates: Option<Vec<String>>,
     pub error_fallback: Option<String>,
@@ -272,7 +347,7 @@ impl ToolDefinition {
 
     #[must_use]
     pub const fn enforce_sandbox(&self) -> bool {
-        self.sandbox.enforce_sandbox
+        self.sandbox.effective_enforce_sandbox()
     }
 
     #[must_use]
@@ -360,24 +435,86 @@ fn resolve_safety(
     }
 }
 
+fn push_unique_strings(dest: &mut Vec<String>, items: &[String]) {
+    for item in items {
+        if !dest.contains(item) {
+            dest.push(item.clone());
+        }
+    }
+}
+
 fn resolve_sandbox(
     raw: &RawTool,
     base: Option<&RawTool>,
     category: Option<&RawTool>,
 ) -> ToolSandboxPolicy {
-    let enforce_sandbox = raw
-        .enforce_sandbox
-        .or(raw.sandbox)
-        .or_else(|| base?.enforce_sandbox.or(base?.sandbox))
-        .or_else(|| category?.enforce_sandbox.or(category?.sandbox))
-        .unwrap_or(false);
+    let mut enforce_sandbox = false;
+    let mut allow_host_fallback = false;
+    let mut profile = SandboxProfile::default();
+
+    for layer in [category, base, Some(raw)].into_iter().flatten() {
+        if let Some(ref decl) = layer.sandbox {
+            match decl {
+                SandboxDecl::Bool(enabled) => {
+                    enforce_sandbox = *enabled;
+                    profile.engine = if *enabled {
+                        SandboxEngine::Bwrap
+                    } else {
+                        SandboxEngine::None
+                    };
+                },
+                SandboxDecl::Profile(p) => {
+                    if let Some(engine) = p.engine {
+                        profile.engine = engine;
+                    } else if profile.engine == SandboxEngine::None
+                        && p.enforce_sandbox != Some(false)
+                    {
+                        profile.engine = SandboxEngine::Bwrap;
+                    }
+
+                    if let Some(explicit) = p.enforce_sandbox {
+                        enforce_sandbox = explicit;
+                    } else {
+                        enforce_sandbox = profile.engine != SandboxEngine::None;
+                    }
+
+                    if let Some(fallback) = p.allow_host_fallback {
+                        allow_host_fallback = fallback;
+                    }
+                    if let Some(net) = p.allow_network {
+                        profile.allow_network = net;
+                    }
+                    if let Some(pid) = p.unshare_pid {
+                        profile.unshare_pid = pid;
+                    }
+                    if let Some(ref binds) = p.read_only_binds {
+                        push_unique_strings(&mut profile.read_only_binds, binds);
+                    }
+                    if let Some(ref binds) = p.writable_binds {
+                        push_unique_strings(&mut profile.writable_binds, binds);
+                    }
+                    if let Some(ref vars) = p.env_passthrough {
+                        push_unique_strings(&mut profile.env_passthrough, vars);
+                    }
+                },
+            }
+        }
+        if let Some(explicit) = layer.enforce_sandbox {
+            enforce_sandbox = explicit;
+            if explicit && profile.engine == SandboxEngine::None {
+                profile.engine = SandboxEngine::Bwrap;
+            } else if !explicit {
+                profile.engine = SandboxEngine::None;
+            }
+        }
+        if let Some(fallback) = layer.allow_host_fallback {
+            allow_host_fallback = fallback;
+        }
+    }
 
     ToolSandboxPolicy {
         enforce_sandbox,
-        allow_host_fallback: resolve_fallback(raw.allow_host_fallback, base, category, |t| {
-            t.allow_host_fallback
-        })
-        .unwrap_or(false),
+        allow_host_fallback,
         enforce_workspace_bounds: resolve_fallback(
             raw.enforce_workspace_bounds,
             base,
@@ -389,6 +526,7 @@ fn resolve_sandbox(
             t.ban_dangerous_files
         })
         .unwrap_or(false),
+        profile,
     }
 }
 
@@ -815,5 +953,81 @@ mod tests {
         assert_eq!(filter.keep_regex, vec!["^error"]);
         assert_eq!(filter.drop_regex, vec!["^\\s*Compiling "]);
         assert_eq!(filter.max_lines, Some(15));
+    }
+
+    #[test]
+    fn test_sandbox_profile_parsing_and_inheritance() {
+        let toml = r#"
+            [categories.security]
+            [categories.security.sandbox]
+            engine = "bwrap"
+            allow_network = false
+            unshare_pid = true
+            read_only_binds = ["/usr", "/lib"]
+            env_passthrough = ["RUST_LOG"]
+
+            [tools.cargo_audit]
+            description = "Audit Cargo dependencies"
+            category = "security"
+            action = "static_command"
+            command = ["cargo", "audit"]
+
+            [tools.cargo_audit.sandbox]
+            allow_network = true
+            read_only_binds = ["/lib", "/etc/ssl/certs"]
+            writable_binds = ["{cwd}", "{home}/.cargo/registry"]
+            env_passthrough = ["CARGO_HOME"]
+
+            [tools.legacy_bool_on]
+            description = "Legacy bool sandbox"
+            action = "static_command"
+            sandbox = true
+            command = ["echo", "ok"]
+
+            [tools.engine_none_override]
+            description = "Opt-out of category sandbox"
+            category = "security"
+            action = "static_command"
+            command = ["echo", "host"]
+
+            [tools.engine_none_override.sandbox]
+            engine = "none"
+        "#;
+
+        let raw = RawToolsConfig::parse(toml).unwrap();
+        let resolved = resolve(&raw);
+
+        let audit = resolved.iter().find(|t| t.name == "cargo_audit").unwrap();
+        assert!(audit.enforce_sandbox());
+        assert_eq!(audit.sandbox.profile.engine, SandboxEngine::Bwrap);
+        assert!(audit.sandbox.profile.allow_network);
+        assert!(audit.sandbox.profile.unshare_pid);
+        assert_eq!(
+            audit.sandbox.profile.read_only_binds,
+            vec!["/usr", "/lib", "/etc/ssl/certs"]
+        );
+        assert_eq!(
+            audit.sandbox.profile.writable_binds,
+            vec!["{cwd}", "{home}/.cargo/registry"]
+        );
+        assert_eq!(
+            audit.sandbox.profile.env_passthrough,
+            vec!["RUST_LOG", "CARGO_HOME"]
+        );
+
+        let legacy = resolved
+            .iter()
+            .find(|t| t.name == "legacy_bool_on")
+            .unwrap();
+        assert!(legacy.enforce_sandbox());
+        assert!(!legacy.sandbox.profile.allow_network);
+        assert!(legacy.sandbox.profile.unshare_pid);
+
+        let disabled = resolved
+            .iter()
+            .find(|t| t.name == "engine_none_override")
+            .unwrap();
+        assert!(!disabled.enforce_sandbox());
+        assert_eq!(disabled.sandbox.profile.engine, SandboxEngine::None);
     }
 }

@@ -140,8 +140,19 @@ fn mountinfo_indicates_container(mountinfo: &str) -> bool {
     false
 }
 
+#[must_use]
+fn expand_sandbox_bind_path(
+    raw: &str,
+    workspace_root: &Path,
+    home_dir: Option<&Path>,
+) -> std::path::PathBuf {
+    let cwd_str = workspace_root.to_string_lossy();
+    let home_str = home_dir.map_or_default(|h| h.to_string_lossy().into_owned());
+    std::path::PathBuf::from(raw.replace("{cwd}", &cwd_str).replace("{home}", &home_str))
+}
+
 /// Builds a Bubblewrap command wrapping the specified binary and arguments in
-/// an isolated jail.
+/// an isolated jail with default strictest isolation.
 #[must_use]
 pub fn build_bubblewrap_command(
     binary: &str,
@@ -149,36 +160,103 @@ pub fn build_bubblewrap_command(
     dynamic_args: &[String],
     workspace_root: &Path,
 ) -> Command {
+    build_bubblewrap_command_with_profile(
+        binary,
+        base_args,
+        dynamic_args,
+        workspace_root,
+        &crate::tools::SandboxProfile::default(),
+    )
+}
+
+/// Builds a Bubblewrap command wrapping the specified binary and arguments
+/// using a granular [`crate::tools::SandboxProfile`].
+#[must_use]
+pub fn build_bubblewrap_command_with_profile(
+    binary: &str,
+    base_args: &[String],
+    dynamic_args: &[String],
+    workspace_root: &Path,
+    profile: &crate::tools::SandboxProfile,
+) -> Command {
+    build_bubblewrap_command_with_env(
+        binary,
+        base_args,
+        dynamic_args,
+        workspace_root,
+        profile,
+        |key| std::env::var(key).ok(),
+    )
+}
+
+fn build_bubblewrap_command_with_env<F>(
+    binary: &str,
+    base_args: &[String],
+    dynamic_args: &[String],
+    workspace_root: &Path,
+    profile: &crate::tools::SandboxProfile,
+    env_lookup: F,
+) -> Command
+where
+    F: Fn(&str) -> Option<String>,
+{
     let mut cmd = Command::new("bwrap");
-    cmd.args([
-        "--unshare-all",
-        "--tmpfs",
-        "/",
-        "--dir",
-        "/tmp",
-        "--ro-bind",
-        "/usr",
-        "/usr",
-        "--ro-bind-try",
-        "/lib",
-        "/lib",
-        "--ro-bind-try",
-        "/lib64",
-        "/lib64",
-        "--ro-bind-try",
-        "/bin",
-        "/bin",
-        "--ro-bind-try",
-        "/sbin",
-        "/sbin",
-        "--ro-bind-try",
-        "/etc",
-        "/etc",
-        "--proc",
-        "/proc",
-        "--dev",
-        "/dev",
-    ]);
+    if !profile.allow_network && profile.unshare_pid {
+        cmd.arg("--unshare-all");
+    } else {
+        cmd.args([
+            "--unshare-user-try",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--unshare-cgroup-try",
+        ]);
+        if profile.unshare_pid {
+            cmd.arg("--unshare-pid");
+        }
+        if !profile.allow_network {
+            cmd.arg("--unshare-net");
+        }
+    }
+
+    cmd.args(["--tmpfs", "/", "--dir", "/tmp"]);
+
+    let home_dir = env_lookup("HOME")
+        .filter(|h| !h.is_empty())
+        .map(std::path::PathBuf::from);
+    let mut ro_seen = Vec::<std::path::PathBuf>::new();
+    if profile.read_only_binds.is_empty() {
+        cmd.args([
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--ro-bind-try",
+            "/lib",
+            "/lib",
+            "--ro-bind-try",
+            "/lib64",
+            "/lib64",
+            "--ro-bind-try",
+            "/bin",
+            "/bin",
+            "--ro-bind-try",
+            "/sbin",
+            "/sbin",
+            "--ro-bind-try",
+            "/etc",
+            "/etc",
+        ]);
+    } else {
+        for raw in &profile.read_only_binds {
+            let expanded = expand_sandbox_bind_path(raw, workspace_root, home_dir.as_deref());
+            if expanded.as_os_str().is_empty() || ro_seen.contains(&expanded) {
+                continue;
+            }
+            cmd.arg("--ro-bind-try").arg(&expanded).arg(&expanded);
+            ro_seen.push(expanded);
+        }
+    }
+
+    cmd.args(["--proc", "/proc", "--dev", "/dev"]);
 
     // If workspace_root is an isolated subagent workspace (e.g.
     // .tkg/workspaces/<agent>), mount the repo root and shared build caches so
@@ -199,9 +277,25 @@ pub fn build_bubblewrap_command(
         }
     }
 
-    cmd.arg("--bind");
-    cmd.arg(workspace_root);
-    cmd.arg(workspace_root);
+    let mut rw_seen = Vec::<std::path::PathBuf>::new();
+    let mut workspace_bound = false;
+    for raw in &profile.writable_binds {
+        let expanded = expand_sandbox_bind_path(raw, workspace_root, home_dir.as_deref());
+        if expanded.as_os_str().is_empty() || rw_seen.contains(&expanded) {
+            continue;
+        }
+        if expanded == workspace_root {
+            workspace_bound = true;
+            cmd.arg("--bind").arg(&expanded).arg(&expanded);
+        } else {
+            cmd.arg("--bind-try").arg(&expanded).arg(&expanded);
+        }
+        rw_seen.push(expanded);
+    }
+
+    if !workspace_bound && !ro_seen.iter().any(|p| p == workspace_root) {
+        cmd.arg("--bind").arg(workspace_root).arg(workspace_root);
+    }
 
     cmd.arg("--chdir");
     cmd.arg(workspace_root);
@@ -209,6 +303,18 @@ pub fn build_bubblewrap_command(
     cmd.arg(binary);
     cmd.args(base_args);
     cmd.args(dynamic_args);
+
+    if !profile.env_passthrough.is_empty() {
+        cmd.env_clear();
+        if let Some(path) = env_lookup("PATH") {
+            cmd.env("PATH", path);
+        }
+        for var in &profile.env_passthrough {
+            if let Some(val) = env_lookup(var) {
+                cmd.env(var, val);
+            }
+        }
+    }
 
     cmd
 }
@@ -240,6 +346,69 @@ mod tests {
         );
         let program = cmd.get_program().to_string_lossy();
         assert_eq!(program, "bwrap");
+    }
+
+    #[test]
+    fn test_build_bubblewrap_command_with_granular_profile() {
+        let root = Path::new("/tmp/workspace");
+        let profile = crate::tools::SandboxProfile {
+            engine: crate::tools::SandboxEngine::Bwrap,
+            allow_network: true,
+            unshare_pid: true,
+            read_only_binds: vec!["/usr".to_owned(), "/etc/ssl/certs".to_owned()],
+            writable_binds: vec!["{cwd}".to_owned(), "{home}/.cargo/registry".to_owned()],
+            env_passthrough: vec!["CARGO_HOME".to_owned()],
+        };
+        let cmd = build_bubblewrap_command_with_env(
+            "cargo",
+            &[String::from("audit")],
+            &[],
+            root,
+            &profile,
+            |k| match k {
+                "HOME" => Some("/home/tester".to_owned()),
+                "PATH" => Some("/usr/bin".to_owned()),
+                "CARGO_HOME" => Some("/home/tester/.cargo".to_owned()),
+                "AWS_SECRET_ACCESS_KEY" => Some("secret".to_owned()),
+                _ => None,
+            },
+        );
+        let argv: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(!argv.iter().any(|a| a == "--unshare-all"));
+        assert!(!argv.iter().any(|a| a == "--unshare-net"));
+        assert!(argv.iter().any(|a| a == "--unshare-pid"));
+        assert!(
+            argv.windows(3)
+                .any(|w| w == ["--ro-bind-try", "/etc/ssl/certs", "/etc/ssl/certs"])
+        );
+        assert!(
+            argv.windows(3)
+                .any(|w| w == ["--bind", "/tmp/workspace", "/tmp/workspace"])
+        );
+        assert!(argv.windows(3).any(|w| {
+            w == [
+                "--bind-try",
+                "/home/tester/.cargo/registry",
+                "/home/tester/.cargo/registry",
+            ]
+        }));
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|val| val.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "CARGO_HOME" && v.as_deref() == Some("/home/tester/.cargo"))
+        );
+        assert!(!envs.iter().any(|(k, _)| k == "AWS_SECRET_ACCESS_KEY"));
     }
 
     #[test]

@@ -102,7 +102,9 @@ pub use rustc_hash::{
     FxBuildHasher, FxBuildHasher as FastBuildHasher, FxHashMap, FxHashMap as FastHashMap,
     FxHashSet, FxHashSet as FastHashSet, FxHasher, FxHasher as FastHasher,
 };
-pub use sandbox::{build_bubblewrap_command, is_inside_container};
+pub use sandbox::{
+    build_bubblewrap_command, build_bubblewrap_command_with_profile, is_inside_container,
+};
 pub use state::{TkgStatePaths, atomic_write, resolve_active_agent, set_active_agent};
 pub use subagent_gate::{
     SubagentAdmissionResult, check_subagent_admission, inspect_subagent_admission,

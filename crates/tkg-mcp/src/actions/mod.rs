@@ -147,7 +147,7 @@ pub(crate) fn execute_supervised_command(
     dynamic_args: &[String],
     workspace_root: &Path,
     timeout_seconds: u64,
-    sandbox: (bool, bool),
+    sandbox: &tkg_common::tools::ToolSandboxPolicy,
     tool_name: &str,
 ) -> Result<std::process::Output, String> {
     execute_supervised_command_with_detector(
@@ -168,7 +168,7 @@ pub(crate) fn execute_supervised_command_with_detector<F>(
     args: (&[String], &[String]),
     workspace_root: &Path,
     timeout_seconds: u64,
-    sandbox: (bool, bool),
+    sandbox: &tkg_common::tools::ToolSandboxPolicy,
     tool_name: &str,
     is_outer_sandbox: F,
 ) -> Result<std::process::Output, String>
@@ -192,7 +192,7 @@ fn execute_supervised_command_with_env<F, B>(
     args: (&[String], &[String]),
     workspace_root: &Path,
     timeout_seconds: u64,
-    sandbox: (bool, bool),
+    sandbox: &tkg_common::tools::ToolSandboxPolicy,
     tool_name: &str,
     is_outer_sandbox: F,
     has_bwrap: B,
@@ -208,7 +208,8 @@ where
     }
 
     let (base_args, dynamic_args) = args;
-    let (enforce_sandbox, allow_host_fallback) = sandbox;
+    let enforce_sandbox = sandbox.effective_enforce_sandbox();
+    let allow_host_fallback = sandbox.allow_host_fallback;
     let host_fallback_ok = || allow_host_fallback && is_outer_sandbox();
     let project_cfg = tkg_common::ProjectConfig::detect_or_load(workspace_root);
     let resolved_env = project_cfg.resolved_environment(workspace_root);
@@ -221,11 +222,12 @@ where
                 which::which(program)
                     .map_or_else(|_| program.to_owned(), |p| p.to_string_lossy().into_owned())
             };
-            let mut cmd = tkg_common::sandbox::build_bubblewrap_command(
+            let mut cmd = tkg_common::sandbox::build_bubblewrap_command_with_profile(
                 &resolved_program,
                 base_args,
                 dynamic_args,
                 workspace_root,
+                &sandbox.profile,
             );
             cmd.envs(&resolved_env);
             let out = SubprocessSupervisor::run_supervised(cmd, timeout_seconds)?;
@@ -896,12 +898,22 @@ mod tests {
         let workspace = std::env::temp_dir();
 
         // Even inside an outer container, allow_host_fallback = false must fail closed.
+        let strict_sandbox = tkg_common::tools::ToolSandboxPolicy {
+            enforce_sandbox: true,
+            allow_host_fallback: false,
+            ..Default::default()
+        };
+        let fallback_sandbox = tkg_common::tools::ToolSandboxPolicy {
+            enforce_sandbox: true,
+            allow_host_fallback: true,
+            ..Default::default()
+        };
         let err = execute_supervised_command_with_env(
             "true",
             (&[], &[]),
             &workspace,
             5,
-            (true, false),
+            &strict_sandbox,
             "guarded_tool",
             || true,
             || false,
@@ -917,7 +929,7 @@ mod tests {
             (&[], &[]),
             &workspace,
             5,
-            (true, true),
+            &fallback_sandbox,
             "guarded_tool",
             || false,
             || false,
@@ -938,7 +950,7 @@ mod tests {
             (&prog_args, &[]),
             &workspace,
             5,
-            (true, true),
+            &fallback_sandbox,
             "guarded_tool",
             || true,
             || false,

@@ -309,7 +309,7 @@ impl McpServer {
                     "mutating": t.safety.mutating,
                     "tracks_circuit_breaker": t.safety.tracks_circuit_breaker,
                     "require_permission_gate": t.safety.require_permission_gate,
-                    "enforce_sandbox": t.sandbox.enforce_sandbox,
+                    "enforce_sandbox": t.enforce_sandbox(),
                     "enforce_workspace_bounds": t.sandbox.enforce_workspace_bounds,
                     "ban_dangerous_files": t.sandbox.ban_dangerous_files,
                     "require_gates": t.preconditions.require_gates,

@@ -87,7 +87,7 @@ impl ToolItem {
 
     #[must_use]
     pub(crate) const fn enforce_sandbox(&self) -> bool {
-        self.sandbox.enforce_sandbox
+        self.sandbox.effective_enforce_sandbox()
     }
 
     #[must_use]
