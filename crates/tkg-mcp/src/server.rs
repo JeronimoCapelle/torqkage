@@ -95,6 +95,13 @@ impl McpServer {
                     "capabilities": {
                         "tools": {
                             "listChanged": false
+                        },
+                        "resources": {
+                            "subscribe": false,
+                            "listChanged": false
+                        },
+                        "prompts": {
+                            "listChanged": false
                         }
                     },
                     "serverInfo": {
@@ -111,6 +118,14 @@ impl McpServer {
                 });
                 Some(JsonRpcResponse::success(id, result))
             },
+
+            "resources/list" => Some(Self::handle_resources_list(id)),
+
+            "resources/read" => Some(self.handle_resources_read(id, req.params.as_ref())),
+
+            "prompts/list" => Some(Self::handle_prompts_list(id)),
+
+            "prompts/get" => Some(Self::handle_prompts_get(id, req.params.as_ref())),
 
             "ping" => Some(JsonRpcResponse::success(id, json!({}))),
 
@@ -175,6 +190,223 @@ impl McpServer {
 
             unknown => Some(JsonRpcResponse::method_not_found(id, unknown)),
         }
+    }
+
+    fn handle_resources_list(id: serde_json::Value) -> JsonRpcResponse {
+        JsonRpcResponse::success(
+            id,
+            json!({
+                "resources": [
+                    {
+                        "uri": "tkg://rules",
+                        "name": "TorqKage Rules & Boundaries",
+                        "description": "Merged project invariants, agent path boundaries, and tool sandbox policies",
+                        "mimeType": "application/json"
+                    },
+                    {
+                        "uri": "tkg://status",
+                        "name": "TorqKage Live Status",
+                        "description": "Live circuit breaker strike count, active agent scope, and sandbox availability",
+                        "mimeType": "application/json"
+                    }
+                ]
+            }),
+        )
+    }
+
+    fn handle_resources_read(
+        &self,
+        id: serde_json::Value,
+        params: Option<&serde_json::Value>,
+    ) -> JsonRpcResponse {
+        let uri = params
+            .and_then(|p| p.get("uri"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+
+        if uri.is_empty() {
+            return JsonRpcResponse::invalid_params(
+                id,
+                "Missing required parameter 'uri' in resources/read",
+            );
+        }
+
+        let payload = match uri {
+            "tkg://rules" => self.build_rules_resource(),
+            "tkg://status" => self.build_status_resource(),
+            other => {
+                return JsonRpcResponse::invalid_params(
+                    id,
+                    format!("Unknown resource URI '{other}'"),
+                );
+            },
+        };
+
+        let text = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string());
+        JsonRpcResponse::success(
+            id,
+            json!({
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": text
+                    }
+                ]
+            }),
+        )
+    }
+
+    fn build_rules_resource(&self) -> serde_json::Value {
+        let project = tkg_common::ProjectConfig::detect_or_load(&self.workspace_root);
+        let tools_summary: Vec<_> = self
+            .tools
+            .iter()
+            .map(|t| {
+                json!({
+                    "name": t.name,
+                    "category": t.category,
+                    "mutating": t.safety.mutating,
+                    "tracks_circuit_breaker": t.safety.tracks_circuit_breaker,
+                    "require_permission_gate": t.safety.require_permission_gate,
+                    "enforce_sandbox": t.sandbox.enforce_sandbox,
+                    "enforce_workspace_bounds": t.sandbox.enforce_workspace_bounds,
+                    "ban_dangerous_files": t.sandbox.ban_dangerous_files,
+                    "require_gates": t.preconditions.require_gates,
+                })
+            })
+            .collect();
+
+        json!({
+            "workspace_root": self.workspace_root,
+            "active_agent": self.agent,
+            "agent_guards": self.agent_guards,
+            "docs_paths": project.docs.paths,
+            "exposed_tools": tools_summary,
+        })
+    }
+
+    fn build_status_resource(&self) -> serde_json::Value {
+        let ledger = tkg_common::CircuitBreakerLedger::load(&self.workspace_root);
+        let active_agent = self
+            .agent
+            .clone()
+            .or_else(|| tkg_common::resolve_active_agent(&self.workspace_root));
+
+        json!({
+            "workspace_root": self.workspace_root,
+            "active_agent": active_agent,
+            "exposed_tools_count": self.tools.len(),
+            "inside_container": tkg_common::is_inside_container(),
+            "bwrap_available": which::which("bwrap").is_ok(),
+            "circuit_breaker": ledger,
+        })
+    }
+
+    fn handle_prompts_list(id: serde_json::Value) -> JsonRpcResponse {
+        JsonRpcResponse::success(
+            id,
+            json!({
+                "prompts": [
+                    {
+                        "name": "tkg-refactor",
+                        "description": "Standardized systems refactoring workflow under TorqKage guards",
+                        "arguments": [
+                            {
+                                "name": "target",
+                                "description": "Module, file, or symbol to refactor",
+                                "required": true
+                            }
+                        ]
+                    },
+                    {
+                        "name": "tkg-audit",
+                        "description": "Verification, security boundary, and quality gate audit checklist",
+                        "arguments": [
+                            {
+                                "name": "scope",
+                                "description": "Subsystem or diff scope to audit",
+                                "required": false
+                            }
+                        ]
+                    }
+                ]
+            }),
+        )
+    }
+
+    fn handle_prompts_get(
+        id: serde_json::Value,
+        params: Option<&serde_json::Value>,
+    ) -> JsonRpcResponse {
+        let name = params
+            .and_then(|p| p.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+
+        if name.is_empty() {
+            return JsonRpcResponse::invalid_params(
+                id,
+                "Missing required parameter 'name' in prompts/get",
+            );
+        }
+
+        let args = params.and_then(|p| p.get("arguments"));
+        let (description, text) = match name {
+            "tkg-refactor" => {
+                let target = args
+                    .and_then(|a| a.get("target"))
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("the target module");
+                (
+                    "Standardized systems refactoring workflow under TorqKage guards",
+                    format!(
+                        "Refactor `{target}` following TorqKage invariants:\n\
+                         1. Read `tkg://rules` and inspect existing callers before editing.\n\
+                         2. Extract shared helpers rather than duplicating logic across variants.\n\
+                         3. Keep functions focused with shallow nesting and preserve unrelated docs/comments.\n\
+                         4. Run compilation, lint, and test gates after edits; never bypass a tripped circuit breaker."
+                    ),
+                )
+            },
+            "tkg-audit" => {
+                let scope = args
+                    .and_then(|a| a.get("scope"))
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("the workspace");
+                (
+                    "Verification, security boundary, and quality gate audit checklist",
+                    format!(
+                        "Audit `{scope}` against TorqKage quality and security gates:\n\
+                         1. Inspect `tkg://status` and `tkg://rules` for active guards and breaker state.\n\
+                         2. Verify fail-closed config/sandbox behavior and workspace path confinement.\n\
+                         3. Confirm zero swallowed errors on fallible I/O or VCS calls.\n\
+                         4. Verify formatting, clippy (`-D warnings`), tests, and documentation links."
+                    ),
+                )
+            },
+            other => {
+                return JsonRpcResponse::invalid_params(id, format!("Unknown prompt '{other}'"));
+            },
+        };
+
+        JsonRpcResponse::success(
+            id,
+            json!({
+                "description": description,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": {
+                            "type": "text",
+                            "text": text
+                        }
+                    }
+                ]
+            }),
+        )
     }
 
     /// Runs the long-running async stdio communication loop.
@@ -531,5 +763,94 @@ mod tests {
         assert_eq!(tool_list.len(), 2);
 
         drop(std::fs::remove_dir_all(&temp_dir));
+    }
+
+    #[test]
+    fn test_resources_list_and_read() {
+        let server = sample_server();
+
+        let list_req = JsonRpcRequest {
+            jsonrpc: "2.0".to_owned(),
+            id: Some(json!(10)),
+            method: "resources/list".to_owned(),
+            params: None,
+        };
+        let list_resp = server.handle_request(list_req).expect("list resp");
+        let resources = list_resp.result.unwrap()["resources"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(resources.len(), 2);
+        assert_eq!(resources[0]["uri"], "tkg://rules");
+        assert_eq!(resources[1]["uri"], "tkg://status");
+
+        let read_rules = server
+            .handle_request(JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(json!(11)),
+                method: "resources/read".to_owned(),
+                params: Some(json!({ "uri": "tkg://rules" })),
+            })
+            .expect("rules resp");
+        let rules_text = read_rules.result.unwrap()["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let rules_json: serde_json::Value = serde_json::from_str(&rules_text).unwrap();
+        assert!(rules_json["exposed_tools"].is_array());
+
+        let read_status = server
+            .handle_request(JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(json!(12)),
+                method: "resources/read".to_owned(),
+                params: Some(json!({ "uri": "tkg://status" })),
+            })
+            .expect("status resp");
+        let status_text = read_status.result.unwrap()["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let status_json: serde_json::Value = serde_json::from_str(&status_text).unwrap();
+        assert_eq!(status_json["exposed_tools_count"], 2);
+        assert!(status_json["circuit_breaker"]["max_strikes"].is_number());
+    }
+
+    #[test]
+    fn test_prompts_list_and_get() {
+        let server = sample_server();
+
+        let list_resp = server
+            .handle_request(JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(json!(20)),
+                method: "prompts/list".to_owned(),
+                params: None,
+            })
+            .expect("prompts list");
+        let prompts = list_resp.result.unwrap()["prompts"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(prompts[0]["name"], "tkg-refactor");
+        assert_eq!(prompts[1]["name"], "tkg-audit");
+
+        let get_resp = server
+            .handle_request(JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(json!(21)),
+                method: "prompts/get".to_owned(),
+                params: Some(json!({
+                    "name": "tkg-refactor",
+                    "arguments": { "target": "crates/tkg-mcp/src/server.rs" }
+                })),
+            })
+            .expect("prompt get");
+        let msg_text = get_resp.result.unwrap()["messages"][0]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(msg_text.contains("crates/tkg-mcp/src/server.rs"));
     }
 }
