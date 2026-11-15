@@ -1,22 +1,35 @@
 //! # tkg-common
 //!
-//! Shared systems primitives, process hygiene supervisor, dynamic workspace root resolver,
-//! and `ProtoJSON` lifecycle models for the `TorqKage` (`tkg`) suite.
+//! Shared systems primitives, process hygiene supervisor, dynamic workspace
+//! root resolver, and `ProtoJSON` lifecycle models for the `TorqKage` (`tkg`)
+//! suite.
 //!
 //! ## Submodules
 //! - [`error`]: Centralized typed error hierarchy ([`TkgError`]).
-//! - [`frontmatter`]: YAML frontmatter extraction from Markdown agent manifests ([`AgentFrontmatter`]).
-//! - [`gatekeeper`]: Modular admission gates and quality checks ([`GateCheck`], [`VcsConflictCheck`]).
-//! - [`handoff`]: Session state handoff recording and wake-up continuity context loader.
-//! - [`jujutsu`]: Jujutsu workspace isolation, branch sync, and build cache symlinking ([`JujutsuWorkspace`]).
-//! - [`manifest_guard`]: Build manifest protection preventing host IDE proc-macro escape vectors.
-//! - [`models`]: `ProtoJSON` schema models for lifecycle hooks, handoffs, and circuit breaker.
-//! - [`resolver`]: Workspace and repository root discovery across Jujutsu and Git checkouts ([`WorkspaceResolver`]).
-//! - [`sandbox`]: Linux container / outer sandbox detection and Bubblewrap jail builder.
-//! - [`subagent_gate`]: Subagent admission gate verifying declared `pre_launch_checks`.
-//! - [`supervisor`]: Process hygiene supervisor with orphan prevention (`PR_SET_PDEATHSIG` + `setpgid`).
-//! - [`tools`]: Declarative `tools.toml` models, parser, and template inheritance engine.
-//! - [`wip`]: Working-in-progress (WIP) working tree change detector and cache tracker.
+//! - [`frontmatter`]: YAML frontmatter extraction from Markdown agent manifests
+//!   ([`AgentFrontmatter`]).
+//! - [`gatekeeper`]: Modular admission gates and quality checks ([`GateCheck`],
+//!   [`VcsConflictCheck`]).
+//! - [`handoff`]: Session state handoff recording and wake-up continuity
+//!   context loader.
+//! - [`jujutsu`]: Jujutsu workspace isolation, branch sync, and build cache
+//!   symlinking ([`JujutsuWorkspace`]).
+//! - [`manifest_guard`]: Build manifest protection preventing host IDE
+//!   proc-macro escape vectors.
+//! - [`models`]: `ProtoJSON` schema models for lifecycle hooks, handoffs, and
+//!   circuit breaker.
+//! - [`resolver`]: Workspace and repository root discovery across Jujutsu and
+//!   Git checkouts ([`WorkspaceResolver`]).
+//! - [`sandbox`]: Linux container / outer sandbox detection and Bubblewrap jail
+//!   builder.
+//! - [`subagent_gate`]: Subagent admission gate verifying declared
+//!   `pre_launch_checks`.
+//! - [`supervisor`]: Process hygiene supervisor with orphan prevention
+//!   (`PR_SET_PDEATHSIG` + `setpgid`).
+//! - [`tools`]: Declarative `tools.toml` models, parser, and template
+//!   inheritance engine.
+//! - [`wip`]: Working-in-progress (WIP) working tree change detector and cache
+//!   tracker.
 
 #![forbid(unsafe_code)]
 

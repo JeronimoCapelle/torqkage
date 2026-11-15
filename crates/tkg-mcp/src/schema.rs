@@ -1,11 +1,13 @@
-//! Dynamic JSON Schema generator converting declarative tools into MCP tool specifications.
+//! Dynamic JSON Schema generator converting declarative tools into MCP tool
+//! specifications.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::models::{ToolAction, ToolDefinition};
 
-/// An individual Model Context Protocol (MCP) tool description emitted during `tools/list`.
+/// An individual Model Context Protocol (MCP) tool description emitted during
+/// `tools/list`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct McpTool {

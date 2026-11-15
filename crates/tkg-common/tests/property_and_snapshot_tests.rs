@@ -1,4 +1,5 @@
-//! Property-based (`proptest`) and snapshot (`insta`) verification suite for `tkg-common`.
+//! Property-based (`proptest`) and snapshot (`insta`) verification suite for
+//! `tkg-common`.
 
 #![allow(
     clippy::unwrap_used,

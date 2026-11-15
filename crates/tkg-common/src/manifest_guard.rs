@@ -6,7 +6,8 @@ use std::path::Path;
 
 use crate::models::AgentGuard;
 
-/// Canonical default list of protected build system manifests across all major languages.
+/// Canonical default list of protected build system manifests across all major
+/// languages.
 pub const DEFAULT_PROTECTED_MANIFESTS: &[&str] = &[
     "Cargo.toml",
     "Cargo.lock",
@@ -29,11 +30,12 @@ pub const DEFAULT_PROTECTED_MANIFESTS: &[&str] = &[
     "Makefile",
 ];
 
-/// Verifies whether a given file path corresponds to a protected build manifest.
+/// Verifies whether a given file path corresponds to a protected build
+/// manifest.
 ///
-/// If `custom_patterns` is provided and non-empty, checks against those patterns
-/// (supporting `*` prefix wildcards and exact case-insensitive matches).
-/// Otherwise, checks against [`DEFAULT_PROTECTED_MANIFESTS`].
+/// If `custom_patterns` is provided and non-empty, checks against those
+/// patterns (supporting `*` prefix wildcards and exact case-insensitive
+/// matches). Otherwise, checks against [`DEFAULT_PROTECTED_MANIFESTS`].
 #[must_use]
 pub fn is_manifest_protected(path_str: &str, custom_patterns: &[String]) -> bool {
     let p = Path::new(path_str);
@@ -56,7 +58,8 @@ pub fn is_manifest_protected(path_str: &str, custom_patterns: &[String]) -> bool
 /// Verifies that unauthorized agents do not mutate protected build manifests.
 ///
 /// # Errors
-/// Returns an error if the agent is not permitted to mutate protected build files.
+/// Returns an error if the agent is not permitted to mutate protected build
+/// files.
 pub fn check_manifest_protection(
     target_path: &Path,
     agent_name: Option<&str>,
@@ -122,10 +125,12 @@ fn is_candidate_path(s: &str) -> bool {
     !trimmed.is_empty() && !trimmed.contains('\n') && trimmed.len() <= 4096
 }
 
-/// Extracts candidate target file path arguments from a tool invocation payload.
+/// Extracts candidate target file path arguments from a tool invocation
+/// payload.
 ///
-/// Priority 1: Inspect keys matching common path or file conventions (`path`, `file`, `dest`, etc.).
-/// Priority 2: If no semantic path keys are present, inspect any single-line string values in the arguments.
+/// Priority 1: Inspect keys matching common path or file conventions (`path`,
+/// `file`, `dest`, etc.). Priority 2: If no semantic path keys are present,
+/// inspect any single-line string values in the arguments.
 #[must_use]
 pub fn extract_candidate_paths(args: &serde_json::Value) -> Vec<String> {
     let mut candidates = Vec::new();

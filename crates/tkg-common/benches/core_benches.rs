@@ -1,4 +1,5 @@
-//! Microbenchmark suite for `tkg-common` hot paths (`content_filter`, `frontmatter`, `tools`, `project`).
+//! Microbenchmark suite for `tkg-common` hot paths (`content_filter`,
+//! `frontmatter`, `tools`, `project`).
 
 use std::path::Path;
 

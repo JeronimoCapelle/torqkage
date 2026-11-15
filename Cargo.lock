@@ -2733,7 +2733,6 @@ dependencies = [
  "serde_json",
  "tkg-common",
  "tokio",
- "toml",
  "which",
 ]
 

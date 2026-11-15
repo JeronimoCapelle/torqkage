@@ -1,4 +1,5 @@
-//! Composable security guards, path confinement, and UTF-8 truncation primitives.
+//! Composable security guards, path confinement, and UTF-8 truncation
+//! primitives.
 
 use std::{
     collections::BTreeMap,
@@ -9,12 +10,13 @@ use tkg_common::{GateCheck, ProjectSecurityConfig, matches_directory_scope_with_
 
 use crate::models::{AgentGuard, ToolDefinition};
 
-/// Inspects a target path against dangerous files, secrets, and repository internals,
-/// guided by optional per-project security configuration.
+/// Inspects a target path against dangerous files, secrets, and repository
+/// internals, guided by optional per-project security configuration.
 ///
 /// # Errors
-/// Returns an error if the path attempts to access sensitive files, credentials, or VCS internals (`.git/`, `.jj/`),
-/// unless explicitly exempted in `security.allowed_patterns`.
+/// Returns an error if the path attempts to access sensitive files,
+/// credentials, or VCS internals (`.git/`, `.jj/`), unless explicitly exempted
+/// in `security.allowed_patterns`.
 pub(crate) fn check_dangerous_files_with_security(
     path: &Path,
     security: Option<&ProjectSecurityConfig>,
@@ -25,7 +27,8 @@ pub(crate) fn check_dangerous_files_with_security(
 /// Resolves and confines a relative path within the canonical workspace bounds.
 ///
 /// # Errors
-/// Returns an error if the path escapes workspace bounds, traverses `..`, or violates directory allowlists.
+/// Returns an error if the path escapes workspace bounds, traverses `..`, or
+/// violates directory allowlists.
 pub(crate) fn resolve_safe_path(
     workspace_root: &Path,
     rel_path_str: &str,
@@ -121,10 +124,12 @@ pub(crate) fn resolve_safe_path(
     Ok(candidate)
 }
 
-/// Enforces single-directory confinement (`enforce_dir`) and single-file target locking (`enforce_file_target`).
+/// Enforces single-directory confinement (`enforce_dir`) and single-file target
+/// locking (`enforce_file_target`).
 ///
 /// # Errors
-/// Returns an error if the candidate path is outside `enforce_dir` or does not match `enforce_file_target`.
+/// Returns an error if the candidate path is outside `enforce_dir` or does not
+/// match `enforce_file_target`.
 pub(crate) fn check_enforce_boundaries(
     workspace_root: &Path,
     candidate: &Path,
@@ -165,7 +170,8 @@ pub(crate) fn check_enforce_boundaries(
 /// Enforces agent-specific directory and file path boundaries.
 ///
 /// # Errors
-/// Returns an error if the agent is restricted and the target path violates the agent's guard.
+/// Returns an error if the agent is restricted and the target path violates the
+/// agent's guard.
 pub(crate) fn check_agent_guard(
     workspace_root: &Path,
     candidate: &Path,
@@ -176,12 +182,15 @@ pub(crate) fn check_agent_guard(
     tkg_common::check_agent_guard_direct(workspace_root, candidate, agent_name, guard)
 }
 
-/// Enforces declarative agent path policies (e.g. `comments_only`, `tests_only`, `delimited`).
+/// Enforces declarative agent path policies (e.g. `comments_only`,
+/// `tests_only`, `delimited`).
 ///
-/// Supports language-agnostic syntax resolution via `project.toml` and auto-detection.
+/// Supports language-agnostic syntax resolution via `project.toml` and
+/// auto-detection.
 ///
 /// # Errors
-/// Returns an error if the agent attempts to modify forbidden content within a policy-guarded path.
+/// Returns an error if the agent attempts to modify forbidden content within a
+/// policy-guarded path.
 pub(crate) fn check_agent_path_policies(
     workspace_root: &Path,
     candidate: &Path,
@@ -206,7 +215,8 @@ pub(crate) fn check_agent_path_policies(
 /// Verifies whether the workspace contains unresolved VCS conflict markers.
 ///
 /// # Errors
-/// Returns an error if conflict markers (e.g. `<<<<<<<`) are detected in the repository.
+/// Returns an error if conflict markers (e.g. `<<<<<<<`) are detected in the
+/// repository.
 pub(crate) fn check_vcs_conflicts(workspace_root: &Path) -> Result<(), String> {
     match tkg_common::VcsConflictCheck.execute(workspace_root) {
         tkg_common::GateCheckStatus::Passed => Ok(()),
@@ -223,10 +233,12 @@ pub(crate) fn check_vcs_conflicts(workspace_root: &Path) -> Result<(), String> {
 ///
 /// Neutralizes procedural-macro / `build.rs` execution sandbox escape vectors.
 ///
-/// Delegates to canonical [`tkg_common::manifest_guard::check_manifest_protection`].
+/// Delegates to canonical
+/// [`tkg_common::manifest_guard::check_manifest_protection`].
 ///
 /// # Errors
-/// Returns an error if the agent is not permitted to mutate protected build files.
+/// Returns an error if the agent is not permitted to mutate protected build
+/// files.
 pub(crate) fn check_manifest_protection(
     target_path: &Path,
     agent_name: Option<&str>,
@@ -258,7 +270,8 @@ const COMMON_ROOT_DIRS: &[&str] = &[
     ".claude",
 ];
 
-/// Helper attempting to resolve a scoped path within declared monorepo subcrate containers.
+/// Helper attempting to resolve a scoped path within declared monorepo subcrate
+/// containers.
 fn resolve_in_subcrates(
     workspace_root: &Path,
     clean: &str,
@@ -288,7 +301,8 @@ fn resolve_in_subcrates(
         }
     }
 
-    // Case B: Path starts with "<crate_name>/<rest>" where <crate_name> exists in a container
+    // Case B: Path starts with "<crate_name>/<rest>" where <crate_name> exists
+    // in a container
     if let Some((possible_crate, rest)) = clean.split_once('/') {
         for container in containers {
             let crate_dir = workspace_root.join(container).join(possible_crate);
@@ -303,8 +317,8 @@ fn resolve_in_subcrates(
         }
     }
 
-    // Case C: Path doesn't mention crate name (e.g. "actions/file_read.rs" or "guards.rs")
-    // Find unique match across all crates in all containers
+    // Case C: Path doesn't mention crate name (e.g. "actions/file_read.rs" or
+    // "guards.rs") Find unique match across all crates in all containers
     let mut unique_match: Option<String> = None;
     let mut match_count = 0_usize;
 
@@ -401,11 +415,13 @@ fn anchor_to_primary_scope(
 
 /// Resolves a path string relative to agent and tool scopes.
 ///
-/// If an agent or tool is confined to a specific directory (e.g., `src` or `docs`), this resolves
-/// relative paths (e.g., `"auth/hasher.rs"` or `"specs/rv32.md"`) to their scoped locations
-/// without forcing the caller to supply the parent directory prefix.
+/// If an agent or tool is confined to a specific directory (e.g., `src` or
+/// `docs`), this resolves relative paths (e.g., `"auth/hasher.rs"` or
+/// `"specs/rv32.md"`) to their scoped locations without forcing the caller to
+/// supply the parent directory prefix.
 ///
-/// Existing workspace paths, absolute paths, and explicit allowed files are preserved transparently.
+/// Existing workspace paths, absolute paths, and explicit allowed files are
+/// preserved transparently.
 #[must_use]
 pub(crate) fn resolve_scoped_path_str(
     workspace_root: &Path,
@@ -423,7 +439,8 @@ pub(crate) fn resolve_scoped_path_str(
         return clean.to_owned();
     }
 
-    // 0. If tool has enforce_file_target, check if clean matches target or its filename
+    // 0. If tool has enforce_file_target, check if clean matches target or its
+    //    filename
     if let Some(target) = tool.and_then(|t| t.enforce_file_target.as_deref()) {
         let clean_target = target.trim_matches(['/', '\\']).replace('\\', "/");
         if clean == clean_target {
@@ -446,7 +463,8 @@ pub(crate) fn resolve_scoped_path_str(
         return clean.to_owned();
     }
 
-    // 2. Collect candidate scopes (ordered: tool enforce_dir, agent allowed_dirs, tool allowed_directories)
+    // 2. Collect candidate scopes (ordered: tool enforce_dir, agent
+    //    allowed_dirs, tool allowed_directories)
     let scopes = collect_candidate_scopes(tool, agent_context);
     if scopes.is_empty() {
         return clean.to_owned();
@@ -457,15 +475,18 @@ pub(crate) fn resolve_scoped_path_str(
     let project = tkg_common::ProjectConfig::detect_or_load(workspace_root);
     let containers = project.resolved_containers(workspace_root);
 
-    // 3. If the path ALREADY matches any candidate scope, don't double-prefix it!
+    // 3. If the path ALREADY matches any candidate scope, don't double-prefix
+    //    it!
     for scope in &scope_refs {
         if matches_directory_scope_with_containers(clean, scope, &containers) {
             return clean.to_owned();
         }
     }
 
-    // 4. If the agent explicitly attempts to access one of its disallowed directories,
-    // do NOT anchor it into an allowed scope. Leave it intact so security checks will reject it.
+    // 4. If the agent explicitly attempts to access one of its disallowed
+    //    directories,
+    // do NOT anchor it into an allowed scope. Leave it intact so security
+    // checks will reject it.
     if let Some((agent_name, guards)) = agent_context
         && let Some(guard) = guards.get(agent_name)
         && guard
@@ -476,12 +497,14 @@ pub(crate) fn resolve_scoped_path_str(
         return clean.to_owned();
     }
 
-    // 5. If the path already exists directly at workspace root, leave as-is (e.g. cross-directory read)
+    // 5. If the path already exists directly at workspace root, leave as-is
+    //    (e.g. cross-directory read)
     if workspace_root.join(clean).exists() {
         return clean.to_owned();
     }
 
-    // 6. Check if the path exists inside candidate scope directly (e.g. "src/auth/hasher.rs")
+    // 6. Check if the path exists inside candidate scope directly (e.g.
+    //    "src/auth/hasher.rs")
     for scope in &scope_refs {
         let candidate = workspace_root.join(scope).join(clean);
         if candidate.exists() {
@@ -494,8 +517,10 @@ pub(crate) fn resolve_scoped_path_str(
         return resolved;
     }
 
-    // 8. If clean starts with a known top-level project directory that is NOT one of our scopes,
-    // do NOT anchor it into our scope (e.g. "tests/test.rs" when scoped to "src").
+    // 8. If clean starts with a known top-level project directory that is NOT
+    //    one of our scopes,
+    // do NOT anchor it into our scope (e.g. "tests/test.rs" when scoped to
+    // "src").
     if let Some((first_component, _)) = clean.split_once('/')
         && !containers.iter().any(|c| c == first_component)
     {
@@ -507,7 +532,8 @@ pub(crate) fn resolve_scoped_path_str(
         }
     }
 
-    // 9. If file does not exist yet (e.g. writing a new file via file_write), anchor to primary scope
+    // 9. If file does not exist yet (e.g. writing a new file via file_write),
+    //    anchor to primary scope
     let primary = tool
         .and_then(|t| t.enforce_dir.as_deref())
         .map(|s| s.trim_matches(['/', '\\']))
@@ -574,7 +600,8 @@ pub(crate) fn truncate_output(
     truncated_text
 }
 
-/// Strips raw ANSI terminal styling sequences (e.g. colors, bold, cursor codes).
+/// Strips raw ANSI terminal styling sequences (e.g. colors, bold, cursor
+/// codes).
 pub(crate) fn strip_ansi(input: &str) -> String {
     anstream::adapter::strip_str(input).to_string()
 }
@@ -822,7 +849,8 @@ mod tests {
         let orig = "pub fn foo() -> u32 { 1 }";
         let with_code_tamper = "pub fn foo() -> u32 { 2 }";
 
-        // tests_guarded_agent: tests allowed in src/, production code edits blocked
+        // tests_guarded_agent: tests allowed in src/, production code edits
+        // blocked
         let with_unit_test =
             "pub fn foo() -> u32 { 1 }\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}";
         assert!(
@@ -959,7 +987,8 @@ mod tests {
         sec_perm.set_category_blocked(tkg_common::SecurityCategory::GenericCredentials, false);
         assert!(check_dangerous_files_with_security(path, Some(&sec_perm)).is_ok());
 
-        // With allowed_patterns, specific directory is allowed even if category blocked
+        // With allowed_patterns, specific directory is allowed even if category
+        // blocked
         let sec_allow = ProjectSecurityConfig {
             allowed_patterns: vec!["src/auth/password/**".into()],
             ..Default::default()
@@ -1078,7 +1107,8 @@ mod tests {
             "spec.md"
         );
 
-        // 7. Disallowed directory is NOT rewritten into allowed scope (preserves security rejection)
+        // 7. Disallowed directory is NOT rewritten into allowed scope
+        //    (preserves security rejection)
         assert_eq!(
             resolve_scoped_path_str(
                 &root,
@@ -1167,7 +1197,8 @@ mod tests {
             },
         );
 
-        // 1. Scoped path with crate prefix "core/hasher.rs" -> "crates/core/src/hasher.rs"
+        // 1. Scoped path with crate prefix "core/hasher.rs" ->
+        //    "crates/core/src/hasher.rs"
         assert_eq!(
             resolve_scoped_path_str(
                 &root,
@@ -1178,7 +1209,8 @@ mod tests {
             "crates/core/src/hasher.rs"
         );
 
-        // 2. Scoped path with "crates/core/hasher.rs" -> "crates/core/src/hasher.rs"
+        // 2. Scoped path with "crates/core/hasher.rs" ->
+        //    "crates/core/src/hasher.rs"
         assert_eq!(
             resolve_scoped_path_str(
                 &root,
@@ -1189,19 +1221,22 @@ mod tests {
             "crates/core/src/hasher.rs"
         );
 
-        // 3. Unique file across crates ("hasher.rs") -> "crates/core/src/hasher.rs"
+        // 3. Unique file across crates ("hasher.rs") ->
+        //    "crates/core/src/hasher.rs"
         assert_eq!(
             resolve_scoped_path_str(&root, "hasher.rs", None, Some(("worker_agent", &guards))),
             "crates/core/src/hasher.rs"
         );
 
-        // 4. Ambiguous file ("lib.rs") in multiple crates falls back without guessing
+        // 4. Ambiguous file ("lib.rs") in multiple crates falls back without
+        //    guessing
         assert_eq!(
             resolve_scoped_path_str(&root, "lib.rs", None, Some(("worker_agent", &guards))),
             "src/lib.rs"
         );
 
-        // 5. Creating new file in crate: "core/token.rs" -> "crates/core/src/token.rs"
+        // 5. Creating new file in crate: "core/token.rs" ->
+        //    "crates/core/src/token.rs"
         assert_eq!(
             resolve_scoped_path_str(
                 &root,
@@ -1212,7 +1247,8 @@ mod tests {
             "crates/core/src/token.rs"
         );
 
-        // 6. Creating new file with full crates prefix: "crates/core/token.rs" -> "crates/core/src/token.rs"
+        // 6. Creating new file with full crates prefix: "crates/core/token.rs"
+        //    -> "crates/core/src/token.rs"
         assert_eq!(
             resolve_scoped_path_str(
                 &root,

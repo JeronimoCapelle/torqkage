@@ -1,8 +1,8 @@
 //! # project
 //!
-//! Declarative `project.toml` configuration model, parser, and ecosystem auto-detection.
-//! Decouples language-specific build tools, compilers, test runners, and build caches
-//! from the `TorqKage` core engine.
+//! Declarative `project.toml` configuration model, parser, and ecosystem
+//! auto-detection. Decouples language-specific build tools, compilers, test
+//! runners, and build caches from the `TorqKage` core engine.
 
 use std::{
     collections::BTreeMap,
@@ -49,10 +49,12 @@ const fn default_gate_timeout() -> u64 {
 /// Declarative workspace layout and ignored cache directories.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectWorkspaceConfig {
-    /// Monorepo container directory names (e.g. `["crates", "packages", "apps", "libs"]`).
+    /// Monorepo container directory names (e.g. `["crates", "packages", "apps",
+    /// "libs"]`).
     #[serde(default)]
     pub containers: Vec<String>,
-    /// Additional build cache or ignored paths for VCS and diff checks (e.g. `["target", ".zig-cache", "build"]`).
+    /// Additional build cache or ignored paths for VCS and diff checks (e.g.
+    /// `["target", ".zig-cache", "build"]`).
     #[serde(default)]
     pub ignored_paths: Vec<String>,
 }
@@ -74,7 +76,8 @@ pub enum SecurityCategory {
     SensitiveExtensions,
 }
 
-/// Declarative security & sensitive file protection configuration for the project.
+/// Declarative security & sensitive file protection configuration for the
+/// project.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectSecurityConfig {
     /// Categories of sensitive files explicitly disabled/permitted.
@@ -83,7 +86,8 @@ pub struct ProjectSecurityConfig {
     /// Additional banned patterns or filenames specified per project.
     #[serde(default)]
     pub extra_banned_patterns: Vec<String>,
-    /// Patterns explicitly allowed to bypass generic credential or extension blocks.
+    /// Patterns explicitly allowed to bypass generic credential or extension
+    /// blocks.
     #[serde(default)]
     pub allowed_patterns: Vec<String>,
 }
@@ -105,7 +109,8 @@ impl ProjectSecurityConfig {
             .any(|c| c.eq_ignore_ascii_case(name))
     }
 
-    /// Whether generic words like "password", "credential", "secret" are blocked. Default: true.
+    /// Whether generic words like "password", "credential", "secret" are
+    /// blocked. Default: true.
     #[must_use]
     pub fn block_generic_credentials(&self) -> bool {
         self.is_category_blocked(SecurityCategory::GenericCredentials)
@@ -123,7 +128,8 @@ impl ProjectSecurityConfig {
         self.is_category_blocked(SecurityCategory::SshKeys)
     }
 
-    /// Whether shell profiles like ".bashrc", ".zshrc", ".profile" are blocked. Default: true.
+    /// Whether shell profiles like ".bashrc", ".zshrc", ".profile" are blocked.
+    /// Default: true.
     #[must_use]
     pub fn block_shell_profiles(&self) -> bool {
         self.is_category_blocked(SecurityCategory::ShellProfiles)
@@ -157,12 +163,13 @@ impl ProjectSecurityConfig {
     }
 }
 
-/// Inspects a target path against dangerous files, secrets, and repository internals,
-/// guided by optional per-project security configuration.
+/// Inspects a target path against dangerous files, secrets, and repository
+/// internals, guided by optional per-project security configuration.
 ///
 /// # Errors
-/// Returns an error if the path attempts to access sensitive files, credentials, or VCS internals (`.git/`, `.jj/`),
-/// unless explicitly exempted in `security.allowed_patterns`.
+/// Returns an error if the path attempts to access sensitive files,
+/// credentials, or VCS internals (`.git/`, `.jj/`), unless explicitly exempted
+/// in `security.allowed_patterns`.
 pub fn check_dangerous_files_with_security(
     path: &Path,
     security: Option<&ProjectSecurityConfig>,
@@ -185,7 +192,8 @@ pub fn check_dangerous_files_with_security(
         }
     }
 
-    // 2. Allowed patterns explicitly exempt paths from generic credential / sensitive extension blocking
+    // 2. Allowed patterns explicitly exempt paths from generic credential /
+    //    sensitive extension blocking
     let is_allowed = security.is_some_and(|sec| {
         sec.allowed_patterns.iter().any(|pat| {
             path_matches_pattern(&path_str, pat)
@@ -279,13 +287,16 @@ pub fn check_dangerous_files_with_security(
 /// Declarative documentation and specification paths for the project.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectDocsConfig {
-    /// List of paths (directories or files) containing project documentation and specifications.
+    /// List of paths (directories or files) containing project documentation
+    /// and specifications.
     #[serde(default)]
     pub paths: Vec<String>,
-    /// Optional description or instructions for agents on how to use the documentation.
+    /// Optional description or instructions for agents on how to use the
+    /// documentation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Optional tool name recommended to agents for searching documentation (e.g. "`query_project_spec`").
+    /// Optional tool name recommended to agents for searching documentation
+    /// (e.g. "`query_project_spec`").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
 }
@@ -297,7 +308,8 @@ impl ProjectDocsConfig {
         &self.paths
     }
 
-    /// Formats a human-readable list of documentation paths for agent awareness.
+    /// Formats a human-readable list of documentation paths for agent
+    /// awareness.
     #[must_use]
     pub fn display_summary(&self) -> String {
         if self.paths.is_empty() {
@@ -320,7 +332,8 @@ pub struct ProjectPolicyConfig {
 /// Declarative execution harness / agent system runner configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectRunnerConfig {
-    /// Harness identifier: "agy" (default), "opencode", "claude", "custom", etc.
+    /// Harness identifier: "agy" (default), "opencode", "claude", "custom",
+    /// etc.
     #[serde(default = "default_harness", alias = "name")]
     pub harness: String,
 
@@ -336,7 +349,8 @@ pub struct ProjectRunnerConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_flag: Option<String>,
 
-    /// Custom flag used to resume conversations (e.g. `"--conversation"` or `"--session"`).
+    /// Custom flag used to resume conversations (e.g. `"--conversation"` or
+    /// `"--session"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_flag: Option<String>,
 
@@ -411,7 +425,8 @@ impl ProjectRunnerConfig {
     }
 }
 
-/// Root project descriptor parsed from `project.toml` or dynamically synthesized.
+/// Root project descriptor parsed from `project.toml` or dynamically
+/// synthesized.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectConfig {
     #[serde(default)]
@@ -441,14 +456,17 @@ pub struct ProjectConfig {
 }
 
 impl ProjectConfig {
-    /// Resolves the effective runner configuration, checking `harness` section first then `runner`.
+    /// Resolves the effective runner configuration, checking `harness` section
+    /// first then `runner`.
     #[must_use]
     pub fn resolved_runner(&self) -> ProjectRunnerConfig {
         self.harness
             .as_ref()
             .map_or_else(|| self.runner.clone(), Clone::clone)
     }
-    /// Returns all declared path policies, combining `path_policies` and `policies.path_policies`.
+
+    /// Returns all declared path policies, combining `path_policies` and
+    /// `policies.path_policies`.
     #[must_use]
     pub fn all_path_policies(&self) -> Vec<crate::content_filter::PathPolicy> {
         let mut all = self.path_policies.clone();
@@ -460,7 +478,8 @@ impl ProjectConfig {
         all
     }
 
-    /// Returns all build cache and ignored directory paths across `sandbox.bind_mounts` and `workspace.ignored_paths`.
+    /// Returns all build cache and ignored directory paths across
+    /// `sandbox.bind_mounts` and `workspace.ignored_paths`.
     #[must_use]
     pub fn all_ignored_or_cache_paths(&self) -> Vec<String> {
         let mut paths = self.sandbox.bind_mounts.clone();
@@ -479,7 +498,8 @@ impl ProjectConfig {
         paths
     }
 
-    /// Checks if a relative path component or prefix matches any declared ignored or build cache directory.
+    /// Checks if a relative path component or prefix matches any declared
+    /// ignored or build cache directory.
     #[must_use]
     pub fn is_ignored_or_cache_path(&self, rel_path: &str) -> bool {
         let clean = rel_path.trim().replace('\\', "/");
@@ -496,13 +516,15 @@ impl ProjectConfig {
         false
     }
 
-    /// Returns the resolved monorepo containers, strictly as declared in `project.toml`.
+    /// Returns the resolved monorepo containers, strictly as declared in
+    /// `project.toml`.
     #[must_use]
     pub fn resolved_containers(&self, _workspace_root: &Path) -> Vec<String> {
         self.workspace.containers.clone()
     }
 
-    /// Auto-detects standard documentation directories and architecture files in the workspace.
+    /// Auto-detects standard documentation directories and architecture files
+    /// in the workspace.
     #[must_use]
     pub fn detect_default_docs_paths(workspace_root: &Path) -> Vec<String> {
         let mut paths = Vec::new();
@@ -519,8 +541,9 @@ impl ProjectConfig {
         paths
     }
 
-    /// Loads `<root>/.tkg/project.toml`, `<root>/project.toml`, or `<root>/plugins/torqkage/project.toml`.
-    /// If no explicit descriptor is found, falls back to a blank/restrictive default configuration
+    /// Loads `<root>/.tkg/project.toml`, `<root>/project.toml`, or
+    /// `<root>/plugins/torqkage/project.toml`. If no explicit descriptor is
+    /// found, falls back to a blank/restrictive default configuration
     /// with auto-detected documentation paths.
     #[must_use]
     pub fn detect_or_load(workspace_root: &Path) -> Self {
@@ -557,8 +580,8 @@ impl ProjectConfig {
         cfg
     }
 
-    /// Infers default compiler gates, cache bind-mounts, and environment variables
-    /// based on recognized repository manifest indicators.
+    /// Infers default compiler gates, cache bind-mounts, and environment
+    /// variables based on recognized repository manifest indicators.
     #[must_use]
     pub fn infer_from_workspace(workspace_root: &Path) -> Self {
         if workspace_root.join("Cargo.toml").is_file() {
@@ -831,7 +854,8 @@ impl ProjectConfig {
         }
     }
 
-    /// Resolves extra cache directories that should be bind-mounted into Bubblewrap.
+    /// Resolves extra cache directories that should be bind-mounted into
+    /// Bubblewrap.
     #[must_use]
     pub fn resolved_cache_binds(&self, workspace_root: &Path) -> Vec<PathBuf> {
         let mut paths = Vec::new();
@@ -844,14 +868,19 @@ impl ProjectConfig {
         paths
     }
 
-    /// Returns the environment variables mapped to their resolved string values.
+    /// Returns the environment variables mapped to their resolved string
+    /// values.
     ///
     /// Paths are resolved relative to `workspace_root` only when appropriate:
-    /// - `CARGO_TARGET_DIR` (if relative) is anchored to `workspace_root` to preserve shared caching across isolated jj workspaces.
-    /// - Explicit relative paths (starting with `./` or `../`) are anchored to `workspace_root`.
-    /// - Path template tokens (`${workspace_root}` or `$WORKSPACE_ROOT`) are substituted.
-    /// - Literal configuration values (flags, options, numbers, tool settings like `CARGO_TERM_COLOR = "always"` or `RUST_BACKTRACE = "1"`)
-    ///   are preserved exactly as declared without prepending filesystem paths.
+    /// - `CARGO_TARGET_DIR` (if relative) is anchored to `workspace_root` to
+    ///   preserve shared caching across isolated jj workspaces.
+    /// - Explicit relative paths (starting with `./` or `../`) are anchored to
+    ///   `workspace_root`.
+    /// - Path template tokens (`${workspace_root}` or `$WORKSPACE_ROOT`) are
+    ///   substituted.
+    /// - Literal configuration values (flags, options, numbers, tool settings
+    ///   like `CARGO_TERM_COLOR = "always"` or `RUST_BACKTRACE = "1"`) are
+    ///   preserved exactly as declared without prepending filesystem paths.
     #[must_use]
     #[allow(
         clippy::literal_string_with_formatting_args,

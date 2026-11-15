@@ -1,15 +1,18 @@
 //! # harness
 //!
-//! The [`Harness`] trait is the single seam between `TorqKage` and an agent execution harness
-//! (Antigravity, `OpenCode`, Claude Code, or any custom CLI). Everything harness-specific that
-//! the suite needs to know *statically* — binary name, CLI flags, directory conventions,
-//! environment variables, plugin install locations — lives in an implementation of this trait.
+//! The [`Harness`] trait is the single seam between `TorqKage` and an agent
+//! execution harness (Antigravity, `OpenCode`, Claude Code, or any custom CLI).
+//! Everything harness-specific that the suite needs to know *statically* —
+//! binary name, CLI flags, directory conventions, environment variables, plugin
+//! install locations — lives in an implementation of this trait.
 //!
-//! Adding a new harness means: implement [`Harness`], register it in [`resolve`] (and
-//! [`builtin_harnesses`]), and optionally implement the behavioural `HarnessDriver` trait in
-//! `tkg-ctrl` and the hook dialect in `tkg-hooks`.
+//! Adding a new harness means: implement [`Harness`], register it in
+//! [`resolve`] (and [`builtin_harnesses`]), and optionally implement the
+//! behavioural `HarnessDriver` trait in `tkg-ctrl` and the hook dialect in
+//! `tkg-hooks`.
 //!
-//! This module also hosts harness-neutral configuration discovery used by every binary.
+//! This module also hosts harness-neutral configuration discovery used by every
+//! binary.
 
 use std::path::{Path, PathBuf};
 
@@ -20,7 +23,8 @@ pub const BUNDLE_NAME: &str = "torqkage";
 
 /// Static description of an agent execution harness.
 pub trait Harness: Send + Sync + std::fmt::Debug {
-    /// Canonical lowercase identifier (`agy`, `opencode`, `claude`, or the custom slug).
+    /// Canonical lowercase identifier (`agy`, `opencode`, `claude`, or the
+    /// custom slug).
     fn id(&self) -> &str;
 
     /// Default executable name.
@@ -62,28 +66,33 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
     /// User-global directories searched for agent manifests.
     fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf>;
 
-    /// Environment variables through which this harness exposes the active agent name.
+    /// Environment variables through which this harness exposes the active
+    /// agent name.
     fn agent_env_vars(&self) -> &'static [&'static str] {
         &[]
     }
 
-    /// Environment variables set when the harness already runs inside its own sandbox.
+    /// Environment variables set when the harness already runs inside its own
+    /// sandbox.
     fn outer_sandbox_env_vars(&self) -> &'static [&'static str] {
         &[]
     }
 
-    /// Path fragments identifying a plugin installation directory of this harness.
+    /// Path fragments identifying a plugin installation directory of this
+    /// harness.
     fn plugin_path_markers(&self) -> Vec<String> {
         Vec::new()
     }
 
-    /// Optional CLI command (argv) to validate a plugin bundle directory for this harness.
+    /// Optional CLI command (argv) to validate a plugin bundle directory for
+    /// this harness.
     fn validate_plugin_command(&self, _bundle_dir: &Path) -> Option<Vec<String>> {
         None
     }
 
-    /// Whether agent manifests should emit Antigravity-specific YAML frontmatter keys
-    /// (`permissionMode`, `commandExecutionPolicy`, `mainAgent`, `subagent`, `inheritMcp`, inline `mcpServers`).
+    /// Whether agent manifests should emit Antigravity-specific YAML
+    /// frontmatter keys (`permissionMode`, `commandExecutionPolicy`,
+    /// `mainAgent`, `subagent`, `inheritMcp`, inline `mcpServers`).
     fn uses_agy_frontmatter(&self) -> bool {
         false
     }
@@ -97,21 +106,27 @@ impl Harness for Antigravity {
     fn id(&self) -> &'static str {
         "agy"
     }
+
     fn sandbox_flag(&self) -> Option<&'static str> {
         Some("--sandbox")
     }
+
     fn resume_flag(&self) -> Option<&'static str> {
         Some("--conversation")
     }
+
     fn workspace_dir(&self) -> Option<String> {
         Some(".gemini".to_owned())
     }
+
     fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
         Some(home.join(".gemini/config/plugins"))
     }
+
     fn workspace_agent_dirs(&self, workspace_root: &Path) -> Vec<PathBuf> {
         vec![workspace_root.join(".gemini/agents")]
     }
+
     fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
         vec![
             home.join(".gemini/config/plugins")
@@ -120,12 +135,15 @@ impl Harness for Antigravity {
             home.join(".gemini/agents"),
         ]
     }
+
     fn agent_env_vars(&self) -> &'static [&'static str] {
         &["AGY_AGENT"]
     }
+
     fn outer_sandbox_env_vars(&self) -> &'static [&'static str] {
         &["AGY_OUTER_SANDBOX"]
     }
+
     fn plugin_path_markers(&self) -> Vec<String> {
         vec![
             "/.gemini/config/plugins/".to_owned(),
@@ -133,6 +151,7 @@ impl Harness for Antigravity {
             "/.gemini/plugins/".to_owned(),
         ]
     }
+
     fn validate_plugin_command(&self, bundle_dir: &Path) -> Option<Vec<String>> {
         Some(vec![
             "agy".to_owned(),
@@ -141,6 +160,7 @@ impl Harness for Antigravity {
             bundle_dir.to_string_lossy().into_owned(),
         ])
     }
+
     fn uses_agy_frontmatter(&self) -> bool {
         true
     }
@@ -154,21 +174,26 @@ impl Harness for OpenCode {
     fn id(&self) -> &'static str {
         "opencode"
     }
+
     fn resume_flag(&self) -> Option<&'static str> {
         Some("--session")
     }
+
     fn workspace_dir(&self) -> Option<String> {
         Some(".opencode".to_owned())
     }
+
     fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
         Some(home.join(".local/share/opencode/plugins"))
     }
+
     fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
         vec![
             home.join(".local/share/opencode/agents"),
             home.join(".opencode/agents"),
         ]
     }
+
     fn plugin_path_markers(&self) -> Vec<String> {
         vec![
             "/.opencode/plugins/".to_owned(),
@@ -185,28 +210,34 @@ impl Harness for ClaudeCode {
     fn id(&self) -> &'static str {
         "claude"
     }
+
     fn workspace_dir(&self) -> Option<String> {
         Some(".claude".to_owned())
     }
+
     fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
         Some(home.join(".claude/plugins"))
     }
+
     fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
         vec![home.join(".claude/agents")]
     }
+
     fn plugin_path_markers(&self) -> Vec<String> {
         vec!["/.claude/plugins/".to_owned()]
     }
 }
 
-/// Any other CLI harness, addressed purely by convention (`.<slug>/agents`, `~/.<slug>/plugins`).
+/// Any other CLI harness, addressed purely by convention (`.<slug>/agents`,
+/// `~/.<slug>/plugins`).
 #[derive(Debug, Clone)]
 pub struct Generic {
     slug: String,
 }
 
 impl Generic {
-    /// Builds a generic harness from a user-provided name (sanitized to a filesystem-safe slug).
+    /// Builds a generic harness from a user-provided name (sanitized to a
+    /// filesystem-safe slug).
     #[must_use]
     pub fn new(name: &str) -> Self {
         let slug: String = name
@@ -233,9 +264,11 @@ impl Harness for Generic {
     fn id(&self) -> &str {
         &self.slug
     }
+
     fn workspace_dir(&self) -> Option<String> {
         (!self.is_placeholder()).then(|| format!(".{}", self.slug))
     }
+
     fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
         Some(if self.is_placeholder() {
             home.join(".config/tkg/plugins")
@@ -243,6 +276,7 @@ impl Harness for Generic {
             home.join(format!(".{}/plugins", self.slug))
         })
     }
+
     fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
         if self.is_placeholder() {
             Vec::new()
@@ -252,14 +286,16 @@ impl Harness for Generic {
     }
 }
 
-/// Resolves a harness implementation from its configured name (`[runner] harness = "..."`).
+/// Resolves a harness implementation from its configured name (`[runner]
+/// harness = "..."`).
 ///
 /// # Adding a New Harness
 /// 1. Implement [`Harness`] for the new harness struct in this module.
 /// 2. Add a match arm here and in [`builtin_harnesses`].
-/// 3. Implement `HarnessDriver` in `tkg-ctrl` (`crates/tkg-ctrl/src/installer.rs`) and
-///    `HookDialect` in `tkg-hooks` (`crates/tkg-hooks/src/stdin.rs`) if the harness uses custom
-///    config registration, session storage, or hook wire JSON.
+/// 3. Implement `HarnessDriver` in `tkg-ctrl`
+///    (`crates/tkg-ctrl/src/installer.rs`) and `HookDialect` in `tkg-hooks`
+///    (`crates/tkg-hooks/src/stdin.rs`) if the harness uses custom config
+///    registration, session storage, or hook wire JSON.
 // TODO(harness): Add native implementations for Cursor, Windsurf, Aider, and Codex CLI.
 #[must_use]
 pub fn resolve(name: &str) -> Box<dyn Harness> {
@@ -271,7 +307,8 @@ pub fn resolve(name: &str) -> Box<dyn Harness> {
     }
 }
 
-/// All built-in harnesses (used for cross-harness fallbacks and marker detection).
+/// All built-in harnesses (used for cross-harness fallbacks and marker
+/// detection).
 #[must_use]
 pub fn builtin_harnesses() -> Vec<Box<dyn Harness>> {
     vec![
@@ -281,7 +318,8 @@ pub fn builtin_harnesses() -> Vec<Box<dyn Harness>> {
     ]
 }
 
-/// Returns the user-global install directory of the plugin bundle for the configured harness.
+/// Returns the user-global install directory of the plugin bundle for the
+/// configured harness.
 #[must_use]
 pub fn plugin_install_dir(runner: &ProjectRunnerConfig) -> Option<PathBuf> {
     let home = home_dir()?;
@@ -291,7 +329,8 @@ pub fn plugin_install_dir(runner: &ProjectRunnerConfig) -> Option<PathBuf> {
         .map(|root| root.join(BUNDLE_NAME))
 }
 
-/// Ordered candidate paths for a declarative config file (highest priority first).
+/// Ordered candidate paths for a declarative config file (highest priority
+/// first).
 ///
 /// 1. `<root>/.tkg/<name>`
 /// 2. `<root>/<name>`

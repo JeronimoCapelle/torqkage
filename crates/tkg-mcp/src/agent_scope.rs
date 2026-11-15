@@ -6,7 +6,8 @@ use tkg_common::{FastHashSet, frontmatter::AgentFrontmatter};
 
 use crate::models::AgentGuard;
 
-/// Resolves the requested agent from command line arguments, environment variables, or `.pipeline/active_agent.json`.
+/// Resolves the requested agent from command line arguments, environment
+/// variables, or `.pipeline/active_agent.json`.
 #[must_use]
 pub(crate) fn resolve_agent_scope(args: &[String], workspace_root: &Path) -> Option<String> {
     // 1. Check CLI args (--agent, -a, --scope, -s)
@@ -21,13 +22,15 @@ pub(crate) fn resolve_agent_scope(args: &[String], workspace_root: &Path) -> Opt
         i = i.saturating_add(1);
     }
 
-    // 2. Check environment variables and persistent agent state bridge via tkg-common
+    // 2. Check environment variables and persistent agent state bridge via
+    //    tkg-common
     tkg_common::resolve_active_agent(workspace_root)
 }
 
 /// Resolves the list of allowed MCP tools for the given agent name.
 /// Reads directly from the agent Markdown frontmatter (`mcp_tools:`).
-/// If no agent file exists or if no tools are listed, returns an empty set (air-gapped default deny).
+/// If no agent file exists or if no tools are listed, returns an empty set
+/// (air-gapped default deny).
 #[must_use]
 pub(crate) fn resolve_allowed_tools(
     workspace_root: &Path,
@@ -51,13 +54,15 @@ fn parse_tools_from_agent_files(
     None
 }
 
-/// Extracts tools listed under `mcp_tools:` or `mcpTools:` in the YAML frontmatter.
+/// Extracts tools listed under `mcp_tools:` or `mcpTools:` in the YAML
+/// frontmatter.
 #[must_use]
 pub(crate) fn extract_mcp_tools_from_markdown(content: &str) -> Option<FastHashSet<String>> {
     AgentFrontmatter::extract_mcp_tools(content)
 }
 
-/// Discovers and parses `AgentGuard` configurations directly from agent Markdown frontmatters.
+/// Discovers and parses `AgentGuard` configurations directly from agent
+/// Markdown frontmatters.
 #[must_use]
 pub(crate) fn resolve_agent_guards(
     workspace_root: &Path,

@@ -1,4 +1,5 @@
-//! `file_write` action handler with path confinement, directory allowlisting, and security guards.
+//! `file_write` action handler with path confinement, directory allowlisting,
+//! and security guards.
 
 use std::{collections::BTreeMap, path::Path};
 
@@ -16,7 +17,8 @@ use crate::{
 /// Executes a bounded file write action.
 ///
 /// # Errors
-/// Returns an error if the path violates security guards, escapes bounds, or fails filesystem write.
+/// Returns an error if the path violates security guards, escapes bounds, or
+/// fails filesystem write.
 pub(crate) fn execute(
     tool: &ToolDefinition,
     workspace_root: &Path,
@@ -275,7 +277,8 @@ mod tests {
             },
         );
 
-        // 1. Worker creates new file "auth/jwt.rs" without prefix -> created in src/auth/jwt.rs
+        // 1. Worker creates new file "auth/jwt.rs" without prefix -> created in
+        //    src/auth/jwt.rs
         let args = json!({
             "path": "auth/jwt.rs",
             "content": "pub fn verify() -> bool { true }"
@@ -286,7 +289,8 @@ mod tests {
             std::fs::read_to_string(temp.join("src/auth/jwt.rs")).expect("read created file");
         assert!(content.contains("pub fn verify()"));
 
-        // 2. Tool with enforce_dir "docs" creates "rfcs/001.md" -> created in docs/rfcs/001.md
+        // 2. Tool with enforce_dir "docs" creates "rfcs/001.md" -> created in
+        //    docs/rfcs/001.md
         let docs_tool = ToolDefinition {
             name: "write_doc".to_owned(),
             enforce_dir: Some("docs".to_owned()),

@@ -1,4 +1,5 @@
-//! `mpatch_edit` action handler applying fuzzy Aider search/replace blocks and unified diffs.
+//! `mpatch_edit` action handler applying fuzzy Aider search/replace blocks and
+//! unified diffs.
 
 use std::{collections::BTreeMap, path::Path};
 
@@ -17,7 +18,8 @@ use crate::{
 /// Executes a bounded fuzzy code modification using `mpatch`.
 ///
 /// # Errors
-/// Returns an error message if guards fail, the file cannot be read, or the patch fails to apply.
+/// Returns an error message if guards fail, the file cannot be read, or the
+/// patch fails to apply.
 pub(crate) fn execute(
     tool: &ToolDefinition,
     workspace_root: &Path,
@@ -97,7 +99,8 @@ pub(crate) fn execute(
     // 1. Try applying patch directly via mpatch
     let patched_res = patch_content_str(patch, Some(&original), &options);
 
-    // 2. If mpatch needed a file path prefix for Aider block, try with path header prepended
+    // 2. If mpatch needed a file path prefix for Aider block, try with path
+    //    header prepended
     let new_content = if let Ok(patched) = patched_res {
         patched
     } else {

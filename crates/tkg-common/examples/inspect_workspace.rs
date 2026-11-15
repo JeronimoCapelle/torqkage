@@ -1,5 +1,6 @@
-//! Standalone example demonstrating `tkg-common` workspace discovery, `project.toml`
-//! inference, agent manifest resolution, and `tools.toml` inheritance resolution.
+//! Standalone example demonstrating `tkg-common` workspace discovery,
+//! `project.toml` inference, agent manifest resolution, and `tools.toml`
+//! inheritance resolution.
 
 #![allow(clippy::print_stdout, reason = "Runnable CLI example output")]
 

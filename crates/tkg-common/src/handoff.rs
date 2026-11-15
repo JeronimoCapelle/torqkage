@@ -6,8 +6,9 @@ use crate::{HandoffRecord, JujutsuWorkspace, PipelineHandoff, ProjectConfig, Tkg
 
 /// Records a structured session handoff to persistent project state.
 ///
-/// Discovers working copy changes via [`JujutsuWorkspace`], constructs a [`PipelineHandoff`]
-/// and [`HandoffRecord`], and serializes them to `.tkg/state/handoff.json` and `.tkg/state/last_handoff.md`.
+/// Discovers working copy changes via [`JujutsuWorkspace`], constructs a
+/// [`PipelineHandoff`] and [`HandoffRecord`], and serializes them to
+/// `.tkg/state/handoff.json` and `.tkg/state/last_handoff.md`.
 ///
 /// # Errors
 /// Returns an error if directory creation or file writing fails.
@@ -70,7 +71,8 @@ pub fn record_session_handoff(
     Ok((pipeline_handoff, record))
 }
 
-/// Reads the latest structured [`PipelineHandoff`] from `.tkg/state/handoff.json`.
+/// Reads the latest structured [`PipelineHandoff`] from
+/// `.tkg/state/handoff.json`.
 #[must_use]
 pub fn read_session_handoff(workspace_root: &Path) -> Option<PipelineHandoff> {
     let paths = TkgStatePaths::new(workspace_root);
@@ -84,7 +86,8 @@ pub fn read_session_handoff(workspace_root: &Path) -> Option<PipelineHandoff> {
     None
 }
 
-/// Reads the latest human-readable [`HandoffRecord`] from `.tkg/state/last_handoff.md`.
+/// Reads the latest human-readable [`HandoffRecord`] from
+/// `.tkg/state/last_handoff.md`.
 #[must_use]
 pub fn read_session_handoff_record(workspace_root: &Path) -> Option<HandoffRecord> {
     let paths = TkgStatePaths::new(workspace_root);
@@ -98,7 +101,8 @@ pub fn read_session_handoff_record(workspace_root: &Path) -> Option<HandoffRecor
     None
 }
 
-/// Resolves an actionable wake-up injection message from the latest session handoff.
+/// Resolves an actionable wake-up injection message from the latest session
+/// handoff.
 ///
 /// Priority 1: Reads and renders `.tkg/state/handoff.json`.
 /// Priority 2: Reads and parses `.tkg/state/last_handoff.md`.

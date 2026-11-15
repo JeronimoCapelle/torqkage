@@ -15,7 +15,8 @@ use crate::{
 /// Executes a bounded file read action.
 ///
 /// # Errors
-/// Returns an error message if the path violates security guards, does not exist, or cannot be read.
+/// Returns an error message if the path violates security guards, does not
+/// exist, or cannot be read.
 pub(crate) fn execute(
     tool: &ToolDefinition,
     workspace_root: &Path,
@@ -64,7 +65,8 @@ pub(crate) fn execute(
     let raw_bytes = std::fs::read(&safe_path)
         .map_err(|err| format!("Failed to read file '{}': {err}", safe_path.display()))?;
 
-    // Gracefully handle files that cannot be decoded as valid UTF-8 text or contain null bytes
+    // Gracefully handle files that cannot be decoded as valid UTF-8 text or
+    // contain null bytes
     if raw_bytes.iter().take(1024).any(|&b| b == 0) {
         return Ok(format!(
             "File '{}' contains non-UTF-8 or binary data ({} bytes) and cannot be displayed as plain text.",
@@ -195,7 +197,8 @@ mod tests {
             ..Default::default()
         };
 
-        // 1. Worker reads scoped relative path "auth/hasher.rs" -> resolves to "src/auth/hasher.rs"
+        // 1. Worker reads scoped relative path "auth/hasher.rs" -> resolves to
+        //    "src/auth/hasher.rs"
         let args = serde_json::json!({ "path": "auth/hasher.rs" });
         let res = execute(&default_tool, &temp, &args, Some("worker_agent"), &guards)
             .expect("read auth/hasher.rs");
@@ -211,7 +214,8 @@ mod tests {
             .expect("read Cargo.toml");
         assert!(res_root.contains("name = \"demo\""));
 
-        // 3. Tool with enforce_dir "docs" reading "specs/rv32.md" -> resolves to "docs/specs/rv32.md"
+        // 3. Tool with enforce_dir "docs" reading "specs/rv32.md" -> resolves
+        //    to "docs/specs/rv32.md"
         let docs_tool = ToolDefinition {
             name: "read_doc".to_owned(),
             enforce_dir: Some("docs".to_owned()),
@@ -221,14 +225,16 @@ mod tests {
         let res_doc = execute(&docs_tool, &temp, &doc_args, None, &guards).expect("read doc");
         assert!(res_doc.contains("# RV32 Spec"));
 
-        // 4. Reading a directory produces clean actionable error without failing with raw OS error 21
+        // 4. Reading a directory produces clean actionable error without
+        //    failing with raw OS error 21
         let dir_path = temp.join("sub_dir");
         std::fs::create_dir_all(&dir_path).unwrap();
         let dir_args = serde_json::json!({ "path": "sub_dir" });
         let dir_err = execute(&root_tool, &temp, &dir_args, None, &guards).unwrap_err();
         assert!(dir_err.contains("is a directory, not a regular file"));
 
-        // 5. Binary/non-UTF8 file returns clean notice without unhandled panic or recommending tools
+        // 5. Binary/non-UTF8 file returns clean notice without unhandled panic
+        //    or recommending tools
         let bin_path = temp.join("output.bin");
         std::fs::write(&bin_path, [0x7f, b'E', b'L', b'F', 0x00, 0x02, 0x01, 0x00]).unwrap();
         let bin_args = serde_json::json!({ "path": "output.bin" });

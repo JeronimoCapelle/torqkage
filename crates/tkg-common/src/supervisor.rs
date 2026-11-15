@@ -9,7 +9,8 @@ use crate::{
     limits::PROCESS_KILL_GRACE_WAIT,
 };
 
-/// Drop guard ensuring child process groups are forcefully terminated if parent drops.
+/// Drop guard ensuring child process groups are forcefully terminated if parent
+/// drops.
 pub struct ChildGuard {
     child: GroupChild,
 }
@@ -45,7 +46,8 @@ impl Drop for ChildGuard {
     }
 }
 
-/// Subprocess supervisor enforcing process hygiene and process group termination.
+/// Subprocess supervisor enforcing process hygiene and process group
+/// termination.
 pub struct SubprocessSupervisor;
 
 impl SubprocessSupervisor {
@@ -58,10 +60,12 @@ impl SubprocessSupervisor {
         Ok(ChildGuard::new(child))
     }
 
-    /// Executes a command with process group supervision and an optional timeout deadline.
+    /// Executes a command with process group supervision and an optional
+    /// timeout deadline.
     ///
     /// # Errors
-    /// Returns an error string if spawning fails or the command exceeds the timeout.
+    /// Returns an error string if spawning fails or the command exceeds the
+    /// timeout.
     pub fn run_supervised(
         mut command: Command,
         timeout_seconds: u64,
@@ -88,7 +92,8 @@ impl SubprocessSupervisor {
                 drop(worker.join());
                 res.map_err(|err| format!("Failed to read process output: {err}"))
             } else {
-                // Timeout expired: kill process group with SIGKILL via safe nix wrapper
+                // Timeout expired: kill process group with SIGKILL via safe nix
+                // wrapper
                 #[cfg(unix)]
                 {
                     if let Ok(pgid) = i32::try_from(child_pid)
@@ -107,7 +112,8 @@ impl SubprocessSupervisor {
                     let _ = child_pid;
                 }
 
-                // Allow grace duration for worker to unblock post-kill; avoid indefinite deadlock
+                // Allow grace duration for worker to unblock post-kill; avoid
+                // indefinite deadlock
                 if rx.recv_timeout(PROCESS_KILL_GRACE_WAIT).is_ok() {
                     drop(worker.join());
                 }

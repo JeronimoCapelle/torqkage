@@ -1085,8 +1085,9 @@ fn draw_validation_modal(frame: &mut Frame<'_>, area: Rect, is_success: bool, me
     frame.render_widget(modal, modal_area);
 }
 
-/// Calculates the window slice `(scroll_offset, visible_count)` to keep `selected_idx`
-/// centered and fully visible within a viewport of height `viewport_height`.
+/// Calculates the window slice `(scroll_offset, visible_count)` to keep
+/// `selected_idx` centered and fully visible within a viewport of height
+/// `viewport_height`.
 const fn compute_scroll_window(
     selected_idx: usize,
     total_items: usize,

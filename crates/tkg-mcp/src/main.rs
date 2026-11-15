@@ -1,19 +1,26 @@
 //! # tkg-mcp
 //!
-//! Declarative, bounded-action Model Context Protocol (MCP) server daemon over stdio.
+//! Declarative, bounded-action Model Context Protocol (MCP) server daemon over
+//! stdio.
 //!
 //! ## Overview
-//! `tkg-mcp` is a persistent daemon that implements the JSON-RPC 2.0 MCP specification over `stdin`/`stdout`.
-//! It reads tool definitions and security guard policies from `plugins/torqkage/tools.toml` and scopes
-//! exposed tools dynamically based on the active agent's YAML frontmatter (`mcp_tools:`).
+//! `tkg-mcp` is a persistent daemon that implements the JSON-RPC 2.0 MCP
+//! specification over `stdin`/`stdout`. It reads tool definitions and security
+//! guard policies from `plugins/torqkage/tools.toml` and scopes exposed tools
+//! dynamically based on the active agent's YAML frontmatter (`mcp_tools:`).
 //!
 //! ## Architecture
-//! - [`actions`]: 10 native action handlers (`file_read`, `file_write`, `mpatch_edit`, `parameterized_cmd`, etc.).
-//! - [`agent_scope`]: Resolves active agent scope and enforces air-gapped default-deny tool allowlists.
-//! - [`config`]: Declarative `tools.toml` parser with template inheritance and security guard models.
-//! - [`guards`]: Path confinement, dangerous file sanitization, and UTF-8 truncation guards.
+//! - [`actions`]: 10 native action handlers (`file_read`, `file_write`,
+//!   `mpatch_edit`, `parameterized_cmd`, etc.).
+//! - [`agent_scope`]: Resolves active agent scope and enforces air-gapped
+//!   default-deny tool allowlists.
+//! - [`config`]: Declarative `tools.toml` parser with template inheritance and
+//!   security guard models.
+//! - [`guards`]: Path confinement, dangerous file sanitization, and UTF-8
+//!   truncation guards.
 //! - [`server`]: Asynchronous JSON-RPC 2.0 event loop powered by Tokio.
-//! - [`validator`]: Startup and pre-flight validation verifying binaries, schemas, and guards.
+//! - [`validator`]: Startup and pre-flight validation verifying binaries,
+//!   schemas, and guards.
 
 #![forbid(unsafe_code)]
 #![allow(

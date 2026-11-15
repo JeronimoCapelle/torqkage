@@ -1,4 +1,5 @@
-//! `cli_manual` action handler providing in-session help, tldr, navi recipes, and man snippets.
+//! `cli_manual` action handler providing in-session help, tldr, navi recipes,
+//! and man snippets.
 
 use std::{fmt::Write, process::Command};
 
@@ -12,7 +13,8 @@ use crate::{guards::truncate_output, models::ToolDefinition};
 /// Executes a CLI manual lookup action (`query_tool_help`).
 ///
 /// Priority ladder:
-/// 1. `TorqKage` internal MCP tool definition & schema (if `tool_name` matches an MCP tool)
+/// 1. `TorqKage` internal MCP tool definition & schema (if `tool_name` matches
+///    an MCP tool)
 /// 2. `navi` cheatsheet recipe (if `query` parameter provided)
 /// 3. `tldr` cheatsheet (concise real-world examples)
 /// 4. `--help` CLI output (short flag reference, capped at 60 lines)
@@ -70,7 +72,8 @@ fn resolve_tool_help(
     let tldr_installed = which::which("tldr").is_ok();
     let man_installed = which::which("man").is_ok();
 
-    // 2. If a specific query/topic was provided, check navi first (if installed)
+    // 2. If a specific query/topic was provided, check navi first (if
+    //    installed)
     if navi_installed
         && let Some(query) = query_opt
         && !query.is_empty()
@@ -89,12 +92,14 @@ fn resolve_tool_help(
         return format!("# navi cheatsheet recipe: {name}\n\n```bash\n{recipe}\n```");
     }
 
-    // 5. Query tool's native `--help` flag (only if tool binary is actually installed)
+    // 5. Query tool's native `--help` flag (only if tool binary is actually
+    //    installed)
     if tool_installed && let Some(help) = query_cli_help(name) {
         return format!("# {name} --help\n\n{help}");
     }
 
-    // 6. Query man page and extract concise NAME + SYNOPSIS block (if installed)
+    // 6. Query man page and extract concise NAME + SYNOPSIS block (if
+    //    installed)
     if man_installed && let Some(man_synopsis) = query_man_synopsis(name) {
         return format!("# man synopsis: {name}\n\n{man_synopsis}");
     }
@@ -266,7 +271,8 @@ fn extract_man_snippet(man_text: &str) -> Option<String> {
     for line in man_text.lines() {
         let trimmed = line.trim();
 
-        // Stop if we hit the exhaustive OPTIONS block or exceed preview lines limit
+        // Stop if we hit the exhaustive OPTIONS block or exceed preview lines
+        // limit
         if started && (trimmed == "OPTIONS" || count >= DEFAULT_MAN_PREVIEW_LINES) {
             break;
         }

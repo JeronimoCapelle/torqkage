@@ -7,7 +7,8 @@ use crate::{
     vcs::run_plugin_validation,
 };
 
-/// Prints an operational status summary of the agent fleet and tool assignments.
+/// Prints an operational status summary of the agent fleet and tool
+/// assignments.
 pub(crate) fn print_fleet_status(agents: &[AgentManifest], tools: &[ToolItem]) {
     println!("================================================================================");
     println!("                     TKG: AGENT FLEET & CAPABILITY STATUS                       ");

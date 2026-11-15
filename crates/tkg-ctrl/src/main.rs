@@ -1,19 +1,27 @@
 //! # tkg
 //!
-//! Offline Ratatui 0.30 terminal control deck, fleet manager, and orchestration utility for `TorqKage`.
+//! Offline Ratatui 0.30 terminal control deck, fleet manager, and orchestration
+//! utility for `TorqKage`.
 //!
 //! ## Overview
-//! `tkg` provides a full-terminal interactive TUI dashboard for managing the agent fleet,
-//! inspecting declarative MCP tools, viewing the compiler failure circuit breaker, and launching supervised
-//! agent sessions with automatic pre-flight gatekeeper checks and Jujutsu workspace isolation.
+//! `tkg` provides a full-terminal interactive TUI dashboard for managing the
+//! agent fleet, inspecting declarative MCP tools, viewing the compiler failure
+//! circuit breaker, and launching supervised agent sessions with automatic
+//! pre-flight gatekeeper checks and Jujutsu workspace isolation.
 //!
 //! ## Core Architecture
-//! - [`app`]: Central state machine handling keyboard navigation, tab switching, and editing buffers.
-//! - [`launcher`]: Pre-launch validator and TTY suspension pipeline for spawning child sessions.
-//! - [`model`]: In-memory models for agent frontmatter manifests and declarative MCP tool definitions.
-//! - [`session`]: Reader querying conversation histories for session resumption.
-//! - [`ui`]: Modular Ratatui rendering pipelines for the Fleet Matrix, Tool Catalog, and Diagnostics.
-//! - [`vcs`]: Jujutsu and Git snapshotting helpers for automated rollbacks and pre-save checkpoints.
+//! - [`app`]: Central state machine handling keyboard navigation, tab
+//!   switching, and editing buffers.
+//! - [`launcher`]: Pre-launch validator and TTY suspension pipeline for
+//!   spawning child sessions.
+//! - [`model`]: In-memory models for agent frontmatter manifests and
+//!   declarative MCP tool definitions.
+//! - [`session`]: Reader querying conversation histories for session
+//!   resumption.
+//! - [`ui`]: Modular Ratatui rendering pipelines for the Fleet Matrix, Tool
+//!   Catalog, and Diagnostics.
+//! - [`vcs`]: Jujutsu and Git snapshotting helpers for automated rollbacks and
+//!   pre-save checkpoints.
 
 #![forbid(unsafe_code)]
 #![allow(
@@ -117,7 +125,8 @@ fn main() -> ExitCode {
     }
 }
 
-/// Resolves the agent name from `-a/--agent <name>` or the first positional (non-flag) argument.
+/// Resolves the agent name from `-a/--agent <name>` or the first positional
+/// (non-flag) argument.
 fn find_agent_arg(args: &[String]) -> Option<&str> {
     let mut iter = args.iter().skip(1);
     while let Some(arg) = iter.next() {

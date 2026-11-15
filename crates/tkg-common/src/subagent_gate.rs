@@ -36,7 +36,8 @@ impl SubagentAdmissionResult {
     }
 }
 
-/// Inspects declared pre-launch gates for `target_agent` and executes all quality checks.
+/// Inspects declared pre-launch gates for `target_agent` and executes all
+/// quality checks.
 #[must_use]
 pub fn inspect_subagent_admission(
     workspace_root: &Path,
@@ -75,7 +76,8 @@ pub fn inspect_subagent_admission(
     }
 }
 
-/// Evaluates subagent admission quality gates, returning `Ok(warnings)` or a formatted denial error string.
+/// Evaluates subagent admission quality gates, returning `Ok(warnings)` or a
+/// formatted denial error string.
 ///
 /// # Errors
 /// Returns an error message if any declared pre-launch quality gates fail.

@@ -22,7 +22,8 @@ pub enum WipCheckResult {
 }
 
 impl WipCheckResult {
-    /// Returns `true` if the working copy is clean with zero uncommitted changes.
+    /// Returns `true` if the working copy is clean with zero uncommitted
+    /// changes.
     #[must_use]
     pub const fn is_clean(&self) -> bool {
         matches!(self, Self::Clean)
@@ -71,7 +72,8 @@ impl WipCheckResult {
 ///
 /// Computes an in-memory hash of `git status -s` or `jj diff --summary`.
 /// If unchanged or clean, avoids generating redundant warnings.
-/// If modified, records the new hash in the session cache and returns the list of modified files.
+/// If modified, records the new hash in the session cache and returns the list
+/// of modified files.
 #[must_use]
 #[allow(
     clippy::print_stderr,

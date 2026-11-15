@@ -4,12 +4,16 @@
 //! `strip_allowed_domain(original) == strip_allowed_domain(new_content)`
 //!
 //! Supports:
-//! - `CommentsOnly`: Only docstrings, line/block comments, doctests, and whitespace may change.
-//! - `TestsOnly`: Only unit test blocks, test items, and test functions may change.
-//! - `Delimited`: Only content bounded between explicit `start_marker` and `end_marker` delimiters may change.
+//! - `CommentsOnly`: Only docstrings, line/block comments, doctests, and
+//!   whitespace may change.
+//! - `TestsOnly`: Only unit test blocks, test items, and test functions may
+//!   change.
+//! - `Delimited`: Only content bounded between explicit `start_marker` and
+//!   `end_marker` delimiters may change.
 //!
-//! Fully language-agnostic: syntax rules (line comments, block comments, test attributes, test prefixes)
-//! can be auto-inferred by file extension or `project.language`, or declared in `project.toml`.
+//! Fully language-agnostic: syntax rules (line comments, block comments, test
+//! attributes, test prefixes) can be auto-inferred by file extension or
+//! `project.language`, or declared in `project.toml`.
 
 use std::path::Path;
 
@@ -26,7 +30,8 @@ pub enum ContentFilterKind {
     /// Allows unit test modules, test items, test functions, and test blocks.
     #[serde(alias = "tests")]
     TestsOnly,
-    /// Allows modifications strictly delimited by configured start and end markers.
+    /// Allows modifications strictly delimited by configured start and end
+    /// markers.
     Delimited,
 }
 
@@ -52,16 +57,19 @@ impl BlockCommentDelimiters {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(from = "RawSyntaxConfig")]
 pub struct SyntaxConfig {
-    /// Line comment prefixes (e.g. `["//"]` for C/Rust/Go/Zig, `["#"]` for Python/Shell, `["--"]` for Lua/SQL).
+    /// Line comment prefixes (e.g. `["//"]` for C/Rust/Go/Zig, `["#"]` for
+    /// Python/Shell, `["--"]` for Lua/SQL).
     #[serde(default)]
     pub line_comments: Vec<String>,
     /// Block comment delimiter pairs (e.g. `/* ... */`, `""" ... """`).
     #[serde(default)]
     pub block_comments: Vec<BlockCommentDelimiters>,
-    /// Test attribute or decorator prefixes (e.g. `["#[test]", "#[cfg(test)]"]`, `["@pytest", "@unittest"]`, `["TEST(", "TEST_F("]`).
+    /// Test attribute or decorator prefixes (e.g. `["#[test]",
+    /// "#[cfg(test)]"]`, `["@pytest", "@unittest"]`, `["TEST(", "TEST_F("]`).
     #[serde(default)]
     pub test_attributes: Vec<String>,
-    /// Function or item name prefixes that identify test definitions (e.g. `["test_"]` for Python, `["Test"]` for Go).
+    /// Function or item name prefixes that identify test definitions (e.g.
+    /// `["test_"]` for Python, `["Test"]` for Go).
     #[serde(default)]
     pub test_prefixes: Vec<String>,
 }
@@ -111,9 +119,10 @@ impl From<RawSyntaxConfig> for SyntaxConfig {
 }
 
 impl SyntaxConfig {
-    /// Generic default syntax providing standard comment syntax (`//`, `/* */`).
-    /// Language-specific test attributes and syntax rules are loaded deterministically
-    /// from `[policies.syntax]` in `project.toml` or agent frontmatter.
+    /// Generic default syntax providing standard comment syntax (`//`, `/*
+    /// */`). Language-specific test attributes and syntax rules are loaded
+    /// deterministically from `[policies.syntax]` in `project.toml` or agent
+    /// frontmatter.
     #[must_use]
     pub fn generic() -> Self {
         Self {
@@ -125,7 +134,8 @@ impl SyntaxConfig {
     }
 }
 
-/// Declarative path policy binding a workspace path pattern to a content filter.
+/// Declarative path policy binding a workspace path pattern to a content
+/// filter.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(from = "RawPathPolicy")]
 pub struct PathPolicy {
@@ -133,7 +143,8 @@ pub struct PathPolicy {
     pub path: String,
     /// The content filter kind enforced on matching files.
     pub filter: ContentFilterKind,
-    /// Optional opening marker for delimited sections (e.g. `"// BEGIN TESTS"`).
+    /// Optional opening marker for delimited sections (e.g. `"// BEGIN
+    /// TESTS"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_marker: Option<String>,
     /// Optional closing marker for delimited sections (e.g. `"// END TESTS"`).
@@ -142,7 +153,8 @@ pub struct PathPolicy {
     /// Optional line comment overrides (e.g. `["#"]`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub line_comments: Vec<String>,
-    /// Optional block comment overrides (e.g. `[ { start = "/*", end = "*/" } ]`).
+    /// Optional block comment overrides (e.g. `[ { start = "/*", end = "*/" }
+    /// ]`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub block_comments: Vec<BlockCommentDelimiters>,
     /// Optional test attribute overrides.
@@ -228,7 +240,8 @@ impl PathPolicy {
         }
     }
 
-    /// Constructs a `Delimited` policy for the specified path with custom markers.
+    /// Constructs a `Delimited` policy for the specified path with custom
+    /// markers.
     #[must_use]
     pub fn delimited(
         path: impl Into<String>,
@@ -244,7 +257,8 @@ impl PathPolicy {
         }
     }
 
-    /// Resolves the effective `SyntaxConfig` for this policy and candidate path.
+    /// Resolves the effective `SyntaxConfig` for this policy and candidate
+    /// path.
     #[must_use]
     pub fn effective_syntax(
         &self,
@@ -272,7 +286,8 @@ impl PathPolicy {
         base
     }
 
-    /// Verifies changes between `original` and `new_content` using default syntax.
+    /// Verifies changes between `original` and `new_content` using default
+    /// syntax.
     ///
     /// # Errors
     /// Returns an error if changes violate the allowed modification domain.
@@ -281,7 +296,8 @@ impl PathPolicy {
         self.verify_with_syntax(Path::new(&self.path), original, new_content, &syntax)
     }
 
-    /// Verifies changes between `original` and `new_content` complying with explicit syntax rules.
+    /// Verifies changes between `original` and `new_content` complying with
+    /// explicit syntax rules.
     ///
     /// # Errors
     /// Returns an error if changes violate the allowed modification domain.
@@ -390,7 +406,8 @@ pub fn normalize_whitespace(s: &str) -> String {
     result.trim().to_owned()
 }
 
-/// Strips all comments from source code using default Rust syntax and normalizes whitespace.
+/// Strips all comments from source code using default Rust syntax and
+/// normalizes whitespace.
 ///
 /// # Examples
 /// ```
@@ -408,14 +425,16 @@ pub fn strip_comments_and_normalize(input: &str) -> String {
     strip_comments_and_normalize_with_syntax(input, &syntax)
 }
 
-/// Strips all comments using explicit language syntax and normalizes whitespace.
+/// Strips all comments using explicit language syntax and normalizes
+/// whitespace.
 #[must_use]
 pub fn strip_comments_and_normalize_with_syntax(input: &str, syntax: &SyntaxConfig) -> String {
     let stripped = strip_comments_with_syntax(input, syntax);
     normalize_whitespace(&stripped)
 }
 
-/// Lexer state-machine stripping comments while preserving code tokens and string contents.
+/// Lexer state-machine stripping comments while preserving code tokens and
+/// string contents.
 #[must_use]
 pub fn strip_comments_with_syntax(input: &str, syntax: &SyntaxConfig) -> String {
     let mut out = String::with_capacity(input.len());
@@ -434,7 +453,8 @@ pub fn strip_comments_with_syntax(input: &str, syntax: &SyntaxConfig) -> String 
             continue;
         }
 
-        // 2. Block comments checked before regular strings (handles Python """ before ")
+        // 2. Block comments checked before regular strings (handles Python """
+        //    before ")
         if let Some(next_idx) = try_consume_block_comment(input, i, &syntax.block_comments) {
             out.push(' ');
             i = next_idx;
@@ -560,7 +580,8 @@ fn consume_quoted_string(
     i
 }
 
-/// Helper attempting to parse a raw string literal `r#"..."#` starting at byte offset `start`.
+/// Helper attempting to parse a raw string literal `r#"..."#` starting at byte
+/// offset `start`.
 fn try_consume_raw_string(input: &str, start: usize) -> Option<(&str, usize)> {
     let bytes = input.as_bytes();
     let len = bytes.len();
@@ -619,7 +640,8 @@ pub fn strip_tests_and_normalize(
     strip_tests_and_normalize_with_syntax(input, &syntax, start_marker, end_marker)
 }
 
-/// Strips unit test blocks using explicit language syntax and normalizes whitespace.
+/// Strips unit test blocks using explicit language syntax and normalizes
+/// whitespace.
 #[must_use]
 pub fn strip_tests_and_normalize_with_syntax(
     input: &str,
@@ -663,7 +685,8 @@ pub fn strip_tests_and_normalize_with_syntax(
     normalize_whitespace(&tests_stripped)
 }
 
-/// Strips indentation-based test functions and classes (e.g. Python `def test_...`, `@pytest`).
+/// Strips indentation-based test functions and classes (e.g. Python `def
+/// test_...`, `@pytest`).
 fn strip_indentation_test_items(input: &str, syntax: &SyntaxConfig) -> String {
     let mut out = String::with_capacity(input.len());
     let mut skipping_indent: Option<usize> = None;
@@ -719,14 +742,18 @@ fn strip_indentation_test_items(input: &str, syntax: &SyntaxConfig) -> String {
     out
 }
 
-/// Strips all content strictly enclosed between `start_marker` and `end_marker`.
+/// Strips all content strictly enclosed between `start_marker` and
+/// `end_marker`.
 ///
 /// # Examples
 /// ```
 /// use tkg_common::strip_delimited;
 ///
 /// let src = "keep_before /*BEGIN*/mutable_zone/*END*/ keep_after";
-/// assert_eq!(strip_delimited(src, "/*BEGIN*/", "/*END*/"), "keep_before  keep_after");
+/// assert_eq!(
+///     strip_delimited(src, "/*BEGIN*/", "/*END*/"),
+///     "keep_before  keep_after"
+/// );
 /// ```
 #[must_use]
 pub fn strip_delimited(input: &str, start_marker: &str, end_marker: &str) -> String {
@@ -753,7 +780,8 @@ pub fn strip_delimited_and_normalize(input: &str, start_marker: &str, end_marker
     normalize_whitespace(&stripped)
 }
 
-/// Checks whether an attribute or item matches declared test attributes or test prefixes.
+/// Checks whether an attribute or item matches declared test attributes or test
+/// prefixes.
 fn is_matching_test_item(token: &str, syntax: &SyntaxConfig) -> bool {
     let clean = token.trim();
     for attr in &syntax.test_attributes {
@@ -773,7 +801,8 @@ fn is_matching_test_item(token: &str, syntax: &SyntaxConfig) -> bool {
     false
 }
 
-/// State-machine lexer that identifies test attributes/definitions and consumes the entire item.
+/// State-machine lexer that identifies test attributes/definitions and consumes
+/// the entire item.
 fn parse_rust_attribute<'a>(
     input: &'a str,
     i: &mut usize,
@@ -942,7 +971,8 @@ fn strip_brace_test_items(input: &str, syntax: &SyntaxConfig) -> String {
             continue;
         }
 
-        // 2. Direct test definitions (e.g. Zig `test "..."`, C++ `TEST(...)`, Go `func Test...`)
+        // 2. Direct test definitions (e.g. Zig `test "..."`, C++ `TEST(...)`,
+        //    Go `func Test...`)
         if matches_direct_test_definition(input, i, syntax) {
             attr_buffer.push(("", true));
         }
@@ -978,7 +1008,8 @@ fn strip_brace_test_items(input: &str, syntax: &SyntaxConfig) -> String {
     out
 }
 
-/// Helper verifying if a relative path is scoped within a directory name at root or declared container package level.
+/// Helper verifying if a relative path is scoped within a directory name at
+/// root or declared container package level.
 #[must_use]
 pub fn matches_directory_scope_with_containers(
     rel_path: &str,
@@ -1028,7 +1059,8 @@ pub fn path_matches_pattern(path_str: &str, pattern: &str) -> bool {
         return true;
     }
 
-    // Directory wildcard e.g. "src/auth/**" or "src/auth/*" matching directory itself or children
+    // Directory wildcard e.g. "src/auth/**" or "src/auth/*" matching directory
+    // itself or children
     if let Some(prefix) = p.strip_suffix("/**").or_else(|| p.strip_suffix("/*")) {
         let prefix = prefix.trim_end_matches('/');
         if target == prefix || target.starts_with(&format!("{prefix}/")) {
@@ -1044,7 +1076,8 @@ pub fn path_matches_pattern(path_str: &str, pattern: &str) -> bool {
         return true;
     }
 
-    // Full glob matching via globset (e.g. "src/**/*.rs", "*.{pem,key}", "tests/*_test.rs")
+    // Full glob matching via globset (e.g. "src/**/*.rs", "*.{pem,key}",
+    // "tests/*_test.rs")
     if p.contains(['*', '?', '[', '{'])
         && let Ok(glob) = globset::GlobBuilder::new(&p)
             .literal_separator(true)
@@ -1072,11 +1105,12 @@ pub fn path_matches_pattern(path_str: &str, pattern: &str) -> bool {
     false
 }
 
-/// Returns an error if the agent is restricted and the target path violates the agent's guard boundaries.
+/// Returns an error if the agent is restricted and the target path violates the
+/// agent's guard boundaries.
 ///
 /// # Errors
-/// Returns a descriptive error message if the path violates `disallowed_files`, `disallowed_dirs`,
-/// or falls outside `allowed_dirs` and `allowed_files`.
+/// Returns a descriptive error message if the path violates `disallowed_files`,
+/// `disallowed_dirs`, or falls outside `allowed_dirs` and `allowed_files`.
 pub fn check_agent_guard_direct(
     workspace_root: &Path,
     candidate: &Path,
@@ -1142,12 +1176,15 @@ pub fn check_agent_guard_direct(
     Ok(())
 }
 
-/// Enforces declarative agent path policies (e.g. `comments_only`, `tests_only`, `delimited`).
+/// Enforces declarative agent path policies (e.g. `comments_only`,
+/// `tests_only`, `delimited`).
 ///
-/// Supports language-agnostic syntax resolution via `project.toml` and auto-detection.
+/// Supports language-agnostic syntax resolution via `project.toml` and
+/// auto-detection.
 ///
 /// # Errors
-/// Returns an error if the agent attempts to modify forbidden content within a policy-guarded path.
+/// Returns an error if the agent attempts to modify forbidden content within a
+/// policy-guarded path.
 pub fn check_agent_path_policies_direct(
     workspace_root: &Path,
     candidate: &Path,
@@ -1507,7 +1544,8 @@ let version = 2;
         assert!(default_policy.verify(tkg_orig, tkg_valid).is_ok());
         assert!(default_policy.verify(tkg_orig, tkg_tampered).is_err());
 
-        // Test backwards-compatible default markers (AGY:EDITABLE_START / AGY:EDITABLE_END)
+        // Test backwards-compatible default markers (AGY:EDITABLE_START /
+        // AGY:EDITABLE_END)
         let agy_orig =
             "// Header\n// AGY:EDITABLE_START\nval = 1\n// AGY:EDITABLE_END\n// Footer\n";
         let agy_valid =

@@ -1,4 +1,5 @@
-//! The Model Context Protocol (MCP) server daemon handling JSON-RPC 2.0 requests over stdio.
+//! The Model Context Protocol (MCP) server daemon handling JSON-RPC 2.0
+//! requests over stdio.
 
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -12,7 +13,8 @@ use crate::{
     schema::McpTool,
 };
 
-/// State machine managing the MCP server daemon and dispatching JSON-RPC requests.
+/// State machine managing the MCP server daemon and dispatching JSON-RPC
+/// requests.
 #[derive(Debug, Clone)]
 pub(crate) struct McpServer {
     tools: Vec<ToolDefinition>,
@@ -23,8 +25,9 @@ pub(crate) struct McpServer {
 }
 
 impl McpServer {
-    /// Constructs a new `McpServer` instance, pre-generating MCP tool schemas for fast responses.
-    /// If `agent_name` is provided, tools are filtered to only those authorized for that agent.
+    /// Constructs a new `McpServer` instance, pre-generating MCP tool schemas
+    /// for fast responses. If `agent_name` is provided, tools are filtered to
+    /// only those authorized for that agent.
     #[must_use]
     pub(crate) fn new(
         tools: Vec<ToolDefinition>,
@@ -76,7 +79,8 @@ impl McpServer {
         }
     }
 
-    /// Handles a single incoming JSON-RPC request and produces a response (if not a notification).
+    /// Handles a single incoming JSON-RPC request and produces a response (if
+    /// not a notification).
     #[must_use]
     pub(crate) fn handle_request(&self, req: JsonRpcRequest) -> Option<JsonRpcResponse> {
         let Some(id) = req.id else {
@@ -176,7 +180,8 @@ impl McpServer {
     /// Runs the long-running async stdio communication loop.
     ///
     /// # Errors
-    /// Returns an I/O error if reading from `stdin` or writing to `stdout` fails.
+    /// Returns an I/O error if reading from `stdin` or writing to `stdout`
+    /// fails.
     pub(crate) async fn run_stdio(&self) -> std::io::Result<()> {
         let stdin = tokio::io::stdin();
         let mut stdout = tokio::io::stdout();

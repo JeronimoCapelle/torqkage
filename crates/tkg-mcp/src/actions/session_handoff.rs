@@ -4,8 +4,8 @@ use std::{fmt::Write, path::Path};
 
 /// Executes the session handoff recording action.
 ///
-/// Discovers working copy modifications and agent deliverables, delegating persistence
-/// to [`tkg_common::handoff::record_session_handoff`].
+/// Discovers working copy modifications and agent deliverables, delegating
+/// persistence to [`tkg_common::handoff::record_session_handoff`].
 ///
 /// # Errors
 /// Returns an error if required arguments are missing or saving fails.

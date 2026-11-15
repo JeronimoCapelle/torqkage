@@ -1,4 +1,5 @@
-//! Data models, YAML frontmatter parser/serializer, and tool catalog definitions.
+//! Data models, YAML frontmatter parser/serializer, and tool catalog
+//! definitions.
 
 use std::{
     fs,
@@ -18,23 +19,31 @@ use tkg_common::{
 pub(crate) enum ToolCategory {
     /// Compilation & code verification (compilers, linters, formatters)
     Compilation,
-    /// Automated testing, coverage & fuzzing (`test`, `coverage`, `mutants`, `fuzz`)
+    /// Automated testing, coverage & fuzzing (`test`, `coverage`, `mutants`,
+    /// `fuzz`)
     Testing,
-    /// Hardware performance, microarchitecture, benchmarks & profiling (`asm`, `perf`, `flamegraph`)
+    /// Hardware performance, microarchitecture, benchmarks & profiling (`asm`,
+    /// `perf`, `flamegraph`)
     Profiling,
-    /// Transactional, bounded filesystem operations (`read_project_file`, `mpatch`)
+    /// Transactional, bounded filesystem operations (`read_project_file`,
+    /// `mpatch`)
     Filesystem,
-    /// Supply-chain, licensing, `SemVer` & changelog auditing (`licenses`, `semver`)
+    /// Supply-chain, licensing, `SemVer` & changelog auditing (`licenses`,
+    /// `semver`)
     Release,
-    /// Repository state, static analysis, specs & manuals (`ast_grep`, `graphtrail`, `tldr`)
+    /// Repository state, static analysis, specs & manuals (`ast_grep`,
+    /// `graphtrail`, `tldr`)
     Diagnostics,
-    /// Documentation generation, markdown and spec queries (`cargo_doc`, `git_cliff`)
+    /// Documentation generation, markdown and spec queries (`cargo_doc`,
+    /// `git_cliff`)
     Documentation,
     /// Version control operations (`jj diff`, `jj absorb`, `git status`)
     Vcs,
-    /// Isolated subagent workspaces (`ensure_agent_workspace`, `merge_agent_workspace`)
+    /// Isolated subagent workspaces (`ensure_agent_workspace`,
+    /// `merge_agent_workspace`)
     Workspace,
-    /// System health, supervisor and circuit breaker controls (`inspect_breaker`, `reset_breaker`)
+    /// System health, supervisor and circuit breaker controls
+    /// (`inspect_breaker`, `reset_breaker`)
     Management,
     /// Uncategorized / custom
     Other,
@@ -172,7 +181,8 @@ impl ToolItem {
         self.formatting.emit_truncation_notice
     }
 
-    /// Infers the logical category based on the tool name and action using generic semantic keywords.
+    /// Infers the logical category based on the tool name and action using
+    /// generic semantic keywords.
     #[must_use]
     pub(crate) fn infer_category(name: &str) -> ToolCategory {
         let n = name.to_ascii_lowercase();
@@ -254,7 +264,8 @@ impl ToolItem {
     }
 }
 
-/// Discovers the path to `tools.toml` across workspace overrides, plugin bundles, and user home configurations.
+/// Discovers the path to `tools.toml` across workspace overrides, plugin
+/// bundles, and user home configurations.
 #[must_use]
 pub(crate) fn find_tools_config_path(workspace_root: &Path) -> Option<PathBuf> {
     tkg_common::harness::find_tools_toml(workspace_root)
@@ -275,7 +286,8 @@ pub(crate) fn load_tools_from_file(path: &Path) -> Result<Vec<ToolItem>, String>
     Ok(items)
 }
 
-/// Updates or removes `require_permission_gate = true` for the specified tool in a `tools.toml` file.
+/// Updates or removes `require_permission_gate = true` for the specified tool
+/// in a `tools.toml` file.
 ///
 /// # Errors
 /// Returns an error if reading, parsing, or writing the file fails.
@@ -314,7 +326,8 @@ pub(crate) fn update_tool_permission_gate_in_file(
     Ok(())
 }
 
-/// Classification flags defining whether an agent is a root agent or a subagent.
+/// Classification flags defining whether an agent is a root agent or a
+/// subagent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct AgentRoleFlags {
     pub(crate) main_agent: bool,
@@ -346,7 +359,8 @@ pub(crate) struct AgentManifest {
 }
 
 impl AgentManifest {
-    /// Constructs an `AgentManifest` from a file path and parsed `AgentFrontmatter`.
+    /// Constructs an `AgentManifest` from a file path and parsed
+    /// `AgentFrontmatter`.
     #[must_use]
     pub(crate) fn from_frontmatter(file_path: PathBuf, mut parsed: AgentFrontmatter) -> Self {
         if parsed.name.is_empty()
@@ -424,7 +438,8 @@ impl AgentManifest {
     }
 
     /// Cycles the agent's permission mode and command execution policy:
-    /// Autonomous (acceptEdits / off) -> Supervised (acceptEdits / ask) -> Planning (plan / off).
+    /// Autonomous (acceptEdits / off) -> Supervised (acceptEdits / ask) ->
+    /// Planning (plan / off).
     pub(crate) fn cycle_permission_policy(&mut self) -> &'static str {
         let desc = match (
             self.permission_mode.as_str(),
@@ -450,14 +465,16 @@ impl AgentManifest {
         desc
     }
 
-    /// Serializes this agent manifest to YAML frontmatter + Markdown directives using the default (`Antigravity`) dialect.
+    /// Serializes this agent manifest to YAML frontmatter + Markdown directives
+    /// using the default (`Antigravity`) dialect.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn serialize(&self) -> String {
         self.serialize_for_harness(&tkg_common::harness::Antigravity)
     }
 
-    /// Serializes this agent manifest to YAML frontmatter + Markdown directives tailored for `harness`.
+    /// Serializes this agent manifest to YAML frontmatter + Markdown directives
+    /// tailored for `harness`.
     #[must_use]
     pub(crate) fn serialize_for_harness(&self, harness: &dyn tkg_common::Harness) -> String {
         self.to_frontmatter().serialize_for_harness(harness)

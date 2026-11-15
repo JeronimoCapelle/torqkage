@@ -1,6 +1,7 @@
 //! Manifest mutation guard blocking unauthorized build manifest modifications.
 //!
-//! Neutralizes the host IDE procedural-macro / `build.rs` execution sandbox escape vector.
+//! Neutralizes the host IDE procedural-macro / `build.rs` execution sandbox
+//! escape vector.
 
 use std::path::Path;
 
@@ -11,10 +12,12 @@ use tkg_common::{PreToolResponse, PreToolUseInput};
 
 use crate::config::HooksConfig;
 
-/// Evaluates whether a tool invocation attempts to modify a protected build manifest.
+/// Evaluates whether a tool invocation attempts to modify a protected build
+/// manifest.
 ///
-/// If a protected manifest (e.g. `Cargo.toml`, `build.rs`, `CMakeLists.txt`) is targeted,
-/// returns a `PreToolResponse::ask` to require explicit operator confirmation before modification.
+/// If a protected manifest (e.g. `Cargo.toml`, `build.rs`, `CMakeLists.txt`) is
+/// targeted, returns a `PreToolResponse::ask` to require explicit operator
+/// confirmation before modification.
 #[must_use]
 pub(crate) fn evaluate_manifest_guard(
     input: &PreToolUseInput,

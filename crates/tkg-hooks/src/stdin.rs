@@ -1,8 +1,10 @@
-//! Hook wire dialect abstraction and `stdin`/`stdout` JSON helpers for lifecycle hooks.
+//! Hook wire dialect abstraction and `stdin`/`stdout` JSON helpers for
+//! lifecycle hooks.
 //!
-//! Each execution harness (Antigravity, Claude Code, `OpenCode`, etc.) can speak a slightly
-//! different JSON dialect over `stdin`/`stdout`. [`HookDialect`] isolates wire translation so
-//! all hook evaluators operate purely on the canonical [`tkg_common`] types.
+//! Each execution harness (Antigravity, Claude Code, `OpenCode`, etc.) can
+//! speak a slightly different JSON dialect over `stdin`/`stdout`.
+//! [`HookDialect`] isolates wire translation so all hook evaluators operate
+//! purely on the canonical [`tkg_common`] types.
 
 use std::io::IsTerminal;
 
@@ -11,24 +13,28 @@ use tkg_common::{
     SessionStartInput, SessionStartResponse, StopInput, StopResponse, ToolCallPayload,
 };
 
-/// Wire-protocol adapter translating between a harness's hook JSON and `TorqKage`'s canonical hook types.
+/// Wire-protocol adapter translating between a harness's hook JSON and
+/// `TorqKage`'s canonical hook types.
 pub(crate) trait HookDialect: Send + Sync {
     /// Parses a raw `stdin` JSON string into a canonical [`PreToolUseInput`].
     fn parse_pre_tool_use(&self, raw: &str) -> Result<PreToolUseInput, serde_json::Error> {
         serde_json::from_str(raw)
     }
 
-    /// Formats a canonical [`PreToolResponse`] into the harness's `stdout` JSON string.
+    /// Formats a canonical [`PreToolResponse`] into the harness's `stdout` JSON
+    /// string.
     fn format_pre_tool_use(&self, resp: &PreToolResponse) -> Result<String, serde_json::Error> {
         serde_json::to_string(resp)
     }
 
-    /// Parses a raw `stdin` JSON string into a canonical [`PreInvocationInput`].
+    /// Parses a raw `stdin` JSON string into a canonical
+    /// [`PreInvocationInput`].
     fn parse_pre_invocation(&self, raw: &str) -> Result<PreInvocationInput, serde_json::Error> {
         serde_json::from_str(raw)
     }
 
-    /// Formats a canonical [`PreInvocationResponse`] into the harness's `stdout` JSON string.
+    /// Formats a canonical [`PreInvocationResponse`] into the harness's
+    /// `stdout` JSON string.
     fn format_pre_invocation(
         &self,
         resp: &PreInvocationResponse,
@@ -41,7 +47,8 @@ pub(crate) trait HookDialect: Send + Sync {
         serde_json::from_str(raw)
     }
 
-    /// Formats a canonical [`StopResponse`] into the harness's `stdout` JSON string.
+    /// Formats a canonical [`StopResponse`] into the harness's `stdout` JSON
+    /// string.
     fn format_stop(&self, resp: &StopResponse) -> Result<String, serde_json::Error> {
         serde_json::to_string(resp)
     }
@@ -51,7 +58,8 @@ pub(crate) trait HookDialect: Send + Sync {
         serde_json::from_str(raw)
     }
 
-    /// Formats a canonical [`SessionStartResponse`] into the harness's `stdout` JSON string.
+    /// Formats a canonical [`SessionStartResponse`] into the harness's `stdout`
+    /// JSON string.
     fn format_session_start(
         &self,
         resp: &SessionStartResponse,
@@ -66,7 +74,8 @@ pub(crate) struct ProtoJsonDialect;
 impl HookDialect for ProtoJsonDialect {
     fn parse_pre_tool_use(&self, raw: &str) -> Result<PreToolUseInput, serde_json::Error> {
         let mut parsed: PreToolUseInput = serde_json::from_str(raw)?;
-        // Also normalize Claude Code / snake_case `tool_name` + `tool_input` if `toolCall` was omitted
+        // Also normalize Claude Code / snake_case `tool_name` + `tool_input` if
+        // `toolCall` was omitted
         if parsed.tool_call.is_none()
             && let Ok(val) = serde_json::from_str::<serde_json::Value>(raw)
             && let Some(name) = val.get("tool_name").and_then(serde_json::Value::as_str)
@@ -127,14 +136,16 @@ impl HookDialect for ClaudeCodeDialect {
 static PROTO_JSON: ProtoJsonDialect = ProtoJsonDialect;
 static CLAUDE_CODE: ClaudeCodeDialect = ClaudeCodeDialect;
 
-/// Returns true if the current environment indicates execution under Claude Code.
+/// Returns true if the current environment indicates execution under Claude
+/// Code.
 #[must_use]
 pub(crate) fn is_claude_harness() -> bool {
     std::env::var("CLAUDE_PROJECT_DIR").is_ok()
         || std::env::var("TKG_HARNESS").is_ok_and(|s| s.eq_ignore_ascii_case("claude"))
 }
 
-/// Returns true if execution is under Claude Code via environment or workspace configuration.
+/// Returns true if execution is under Claude Code via environment or workspace
+/// configuration.
 #[must_use]
 pub(crate) fn is_claude_harness_for_root(root: &std::path::Path) -> bool {
     is_claude_harness()
@@ -169,7 +180,8 @@ fn read_raw_stdin() -> Option<String> {
     }
 }
 
-/// Reads and deserializes a `PreToolUseInput` payload from `stdin` via the active [`HookDialect`].
+/// Reads and deserializes a `PreToolUseInput` payload from `stdin` via the
+/// active [`HookDialect`].
 #[must_use]
 pub(crate) fn read_pre_tool_use_input() -> PreToolUseInput {
     let Some(raw) = read_raw_stdin() else {
@@ -191,7 +203,8 @@ pub(crate) fn write_pre_tool_use_response(resp: &PreToolResponse) {
     }
 }
 
-/// Reads and deserializes a `PreInvocationInput` payload from `stdin` via the active [`HookDialect`].
+/// Reads and deserializes a `PreInvocationInput` payload from `stdin` via the
+/// active [`HookDialect`].
 #[must_use]
 pub(crate) fn read_pre_invocation_input() -> PreInvocationInput {
     let Some(raw) = read_raw_stdin() else {
@@ -213,7 +226,8 @@ pub(crate) fn write_pre_invocation_response(resp: &PreInvocationResponse) {
     }
 }
 
-/// Reads and deserializes a `StopInput` payload from `stdin` via the active [`HookDialect`].
+/// Reads and deserializes a `StopInput` payload from `stdin` via the active
+/// [`HookDialect`].
 #[must_use]
 pub(crate) fn read_stop_input() -> StopInput {
     let Some(raw) = read_raw_stdin() else {
@@ -235,7 +249,8 @@ pub(crate) fn write_stop_response(resp: &StopResponse) {
     }
 }
 
-/// Reads and deserializes a `SessionStartInput` payload from `stdin` via the active [`HookDialect`].
+/// Reads and deserializes a `SessionStartInput` payload from `stdin` via the
+/// active [`HookDialect`].
 #[must_use]
 pub(crate) fn read_session_start_input() -> SessionStartInput {
     let Some(raw) = read_raw_stdin() else {

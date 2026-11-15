@@ -1,8 +1,10 @@
-//! Project-specific conversation session reader and multi-harness discovery engine.
+//! Project-specific conversation session reader and multi-harness discovery
+//! engine.
 //!
 //! # Architecture
-//! This module discovers past conversation sessions for an agent within the active workspace
-//! via the [`SessionProvider`] trait (`OpenCodeSessionProvider`, `AntigravitySessionProvider`,
+//! This module discovers past conversation sessions for an agent within the
+//! active workspace via the [`SessionProvider`] trait
+//! (`OpenCodeSessionProvider`, `AntigravitySessionProvider`,
 //! `GenericSessionProvider`).
 
 use std::{
@@ -14,7 +16,8 @@ use std::{
 
 use serde::Deserialize;
 
-/// Compact summary of a past conversation session for a specific agent in this workspace.
+/// Compact summary of a past conversation session for a specific agent in this
+/// workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(crate) struct SessionSummary {
     pub(crate) conversation_id: String,
@@ -79,7 +82,8 @@ fn session_matches_workspace(
     ws_canonical: &Path,
     history_map: &HashMap<String, PathBuf>,
 ) -> bool {
-    // 1. Direct workspace_uris match (e.g. from IDE or multi-root workspace flag)
+    // 1. Direct workspace_uris match (e.g. from IDE or multi-root workspace
+    //    flag)
     if !row.workspace_uris.is_empty() {
         let ws_str = ws_canonical.to_string_lossy();
         if row.workspace_uris.contains(&*ws_str) {
@@ -91,7 +95,8 @@ fn session_matches_workspace(
         }
     }
 
-    // 2. CLI interaction history match (history.jsonl records working directory for each turn)
+    // 2. CLI interaction history match (history.jsonl records working directory
+    //    for each turn)
     if let Some(hist_ws) = history_map.get(&row.conversation_id)
         && workspace_matches(hist_ws, ws_canonical)
     {
@@ -123,9 +128,11 @@ fn session_matches_workspace(
     false
 }
 
-/// Abstract session provider contract for discovering prior agent conversations.
+/// Abstract session provider contract for discovering prior agent
+/// conversations.
 pub(crate) trait SessionProvider: Send + Sync {
-    /// Discovers the latest resumable session for a given agent in the given workspace.
+    /// Discovers the latest resumable session for a given agent in the given
+    /// workspace.
     fn find_agent_session(&self, agent_name: &str, workspace_root: &Path)
     -> Option<SessionSummary>;
 }
@@ -156,7 +163,8 @@ impl SessionProvider for AntigravitySessionProvider {
     }
 }
 
-/// `OpenCode` session provider discovering `.opencode/sessions` and user directory traces.
+/// `OpenCode` session provider discovering `.opencode/sessions` and user
+/// directory traces.
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct OpenCodeSessionProvider;
 
@@ -184,7 +192,8 @@ impl SessionProvider for GenericSessionProvider {
     }
 }
 
-/// Factory creating a `SessionProvider` dynamically matching the configured execution harness.
+/// Factory creating a `SessionProvider` dynamically matching the configured
+/// execution harness.
 #[must_use]
 pub(crate) fn create_session_provider(
     runner_cfg: &tkg_common::ProjectRunnerConfig,
@@ -192,7 +201,8 @@ pub(crate) fn create_session_provider(
     crate::installer::driver_for(runner_cfg).session_provider()
 }
 
-/// Discovers the latest resumable session for a given agent in the given workspace using explicit runner settings.
+/// Discovers the latest resumable session for a given agent in the given
+/// workspace using explicit runner settings.
 #[must_use]
 pub(crate) fn find_agent_session_with_runner(
     agent_name: &str,
@@ -203,9 +213,11 @@ pub(crate) fn find_agent_session_with_runner(
     provider.find_agent_session(agent_name, workspace_root)
 }
 
-/// Discovers the latest resumable session for a given agent in the given workspace.
+/// Discovers the latest resumable session for a given agent in the given
+/// workspace.
 ///
-/// Automatically inspects `project.toml` to select the appropriate session backend.
+/// Automatically inspects `project.toml` to select the appropriate session
+/// backend.
 #[must_use]
 pub(crate) fn find_agent_session_for_workspace(
     agent_name: &str,

@@ -11,15 +11,17 @@ pub struct WorkspaceResolver;
 impl WorkspaceResolver {
     /// Discovers the canonical repository root by walking up from `start_dir`.
     ///
-    /// Correctly distinguishes primary repositories from Jujutsu secondary workspaces
-    /// (e.g. `.tkg/workspaces/<agent>`) by resolving pointer files in `.jj/repo`.
+    /// Correctly distinguishes primary repositories from Jujutsu secondary
+    /// workspaces (e.g. `.tkg/workspaces/<agent>`) by resolving pointer files
+    /// in `.jj/repo`.
     ///
-    /// If `start_dir` is omitted and the process was launched inside an installed harness plugin
-    /// installation directory (`PLUGIN_ROOT`), it automatically recovers the caller's actual
-    /// workspace root from `$PWD`.
+    /// If `start_dir` is omitted and the process was launched inside an
+    /// installed harness plugin installation directory (`PLUGIN_ROOT`), it
+    /// automatically recovers the caller's actual workspace root from `$PWD`.
     ///
     /// # Errors
-    /// Returns `TkgError::Io` if querying current directory or canonicalization fails.
+    /// Returns `TkgError::Io` if querying current directory or canonicalization
+    /// fails.
     pub fn find_root(start_dir: Option<&Path>) -> Result<PathBuf> {
         let current = if let Some(p) = start_dir {
             p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
@@ -34,7 +36,8 @@ impl WorkspaceResolver {
             if jj_dir.is_dir() {
                 let repo_ptr = jj_dir.join("repo");
                 if repo_ptr.is_file() {
-                    // Secondary Jujutsu workspace: pointer file references main repo's .jj/repo
+                    // Secondary Jujutsu workspace: pointer file references main
+                    // repo's .jj/repo
                     if let Ok(target) = std::fs::read_to_string(&repo_ptr) {
                         let trimmed = target.trim();
                         let full_target = jj_dir.join(trimmed);
@@ -85,8 +88,9 @@ impl WorkspaceResolver {
         current.canonicalize().map_err(TkgError::Io)
     }
 
-    /// Detects if `cwd` is locked inside a harness plugin installation directory
-    /// and recovers the caller's actual project directory from `$PWD` if valid.
+    /// Detects if `cwd` is locked inside a harness plugin installation
+    /// directory and recovers the caller's actual project directory from `$PWD`
+    /// if valid.
     #[must_use]
     pub fn detect_plugin_sandbox_escape(cwd: &Path) -> Option<PathBuf> {
         let canon_cwd = cwd.canonicalize().ok()?;
@@ -164,7 +168,8 @@ mod tests {
     #[test]
     fn test_detect_plugin_sandbox_escape_inactive_outside_plugins() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        // When running in a normal project directory, escape detection returns None
+        // When running in a normal project directory, escape detection returns
+        // None
         assert!(WorkspaceResolver::detect_plugin_sandbox_escape(&manifest_dir).is_none());
     }
 }

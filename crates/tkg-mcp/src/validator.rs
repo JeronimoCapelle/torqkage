@@ -1,4 +1,5 @@
-//! Validation engine verifying tool specifications and host binary prerequisites.
+//! Validation engine verifying tool specifications and host binary
+//! prerequisites.
 
 use tkg_common::DEFAULT_MISSING_BINARIES_PREVIEW;
 

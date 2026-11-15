@@ -108,7 +108,8 @@ impl AgentFrontmatter {
     /// Parses an agent Markdown file content string into an `AgentFrontmatter`.
     ///
     /// # Errors
-    /// Returns an error if the opening or closing `---` fences are missing or YAML syntax is invalid.
+    /// Returns an error if the opening or closing `---` fences are missing or
+    /// YAML syntax is invalid.
     pub fn parse(content: &str) -> Result<Self, String> {
         let (frontmatter, directives) = parse_fenced_block(content)?;
         let mut manifest: Self = if frontmatter.trim().is_empty() {
@@ -150,7 +151,8 @@ impl AgentFrontmatter {
         }
     }
 
-    /// Extracts an `AgentGuard` from an agent Markdown document if any boundaries are defined.
+    /// Extracts an `AgentGuard` from an agent Markdown document if any
+    /// boundaries are defined.
     #[must_use]
     pub fn extract_guard(content: &str) -> Option<crate::models::AgentGuard> {
         let parsed = Self::parse(content).ok()?;
@@ -166,7 +168,8 @@ impl AgentFrontmatter {
         }
     }
 
-    /// Serializes this agent manifest to YAML frontmatter + Markdown directives tailored for `harness`.
+    /// Serializes this agent manifest to YAML frontmatter + Markdown directives
+    /// tailored for `harness`.
     #[must_use]
     pub fn serialize_for_harness(&self, harness: &dyn crate::Harness) -> String {
         let mut out = String::new();
@@ -250,7 +253,8 @@ impl AgentFrontmatter {
         out
     }
 
-    /// Parses an agent Markdown file from disk, filling in `name` from the file stem if omitted in YAML.
+    /// Parses an agent Markdown file from disk, filling in `name` from the file
+    /// stem if omitted in YAML.
     ///
     /// # Errors
     /// Returns an error if reading the file or parsing YAML frontmatter fails.
@@ -280,9 +284,11 @@ fn write_yaml_list(out: &mut String, key: &str, items: &[String], emit_empty: bo
     }
 }
 
-/// Discovers and parses all unique agent manifests across candidate locations for `workspace_root`.
+/// Discovers and parses all unique agent manifests across candidate locations
+/// for `workspace_root`.
 ///
-/// Returns `(file_path, AgentFrontmatter)` tuples sorted alphabetically by agent name.
+/// Returns `(file_path, AgentFrontmatter)` tuples sorted alphabetically by
+/// agent name.
 #[must_use]
 pub fn discover_agent_frontmatters(workspace_root: &Path) -> Vec<(PathBuf, AgentFrontmatter)> {
     let candidate_dirs = candidate_agent_directories(workspace_root);
@@ -334,8 +340,8 @@ fn parse_fenced_block(content: &str) -> Result<(&str, String), String> {
     Ok((frontmatter, directives))
 }
 
-/// Returns the ordered list of candidate directories where agent manifests are located,
-/// honoring configured `agent_dirs` and execution harness preferences.
+/// Returns the ordered list of candidate directories where agent manifests are
+/// located, honoring configured `agent_dirs` and execution harness preferences.
 #[must_use]
 pub fn candidate_agent_directories_with_config(
     workspace_root: &Path,
@@ -375,7 +381,8 @@ pub fn candidate_agent_directories_with_config(
     dirs
 }
 
-/// Returns the ordered list of candidate directories where agent manifests are located.
+/// Returns the ordered list of candidate directories where agent manifests are
+/// located.
 #[must_use]
 pub fn candidate_agent_directories(workspace_root: &Path) -> Vec<PathBuf> {
     let project_cfg = crate::project::ProjectConfig::detect_or_load(workspace_root);

@@ -1,4 +1,5 @@
-//! `static_command` action handler executing pre-configured argv vectors with zero shell injection.
+//! `static_command` action handler executing pre-configured argv vectors with
+//! zero shell injection.
 
 use std::path::Path;
 
@@ -12,7 +13,8 @@ use crate::{
 /// Returns a tuple of `(output_text, is_error)`.
 ///
 /// # Errors
-/// Returns an error string if spawning the process fails or the command vector is empty.
+/// Returns an error string if spawning the process fails or the command vector
+/// is empty.
 pub(crate) fn execute(
     tool: &ToolDefinition,
     workspace_root: &Path,

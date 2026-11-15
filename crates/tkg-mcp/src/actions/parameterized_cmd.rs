@@ -1,4 +1,5 @@
-//! `parameterized_cmd` action handler executing bounded host binaries with argument regex validation.
+//! `parameterized_cmd` action handler executing bounded host binaries with
+//! argument regex validation.
 
 use std::path::Path;
 
@@ -169,7 +170,8 @@ fn validate_and_build_args(
 /// Returns a tuple of `(output_text, is_error)`.
 ///
 /// # Errors
-/// Returns an error message if argument validation fails or the process fails to spawn.
+/// Returns an error message if argument validation fails or the process fails
+/// to spawn.
 pub(crate) fn execute(
     tool: &ToolDefinition,
     workspace_root: &Path,
@@ -414,7 +416,8 @@ mod tests {
         assert!(!is_err);
         assert_eq!(out, "No matching AST patterns found to rewrite.");
 
-        // Verify that patterns starting with dashes like --help are handled safely without CLI option injection
+        // Verify that patterns starting with dashes like --help are handled
+        // safely without CLI option injection
         let args_dash = json!({
             "pattern": "--help",
             "rewrite": "replaced"
@@ -423,7 +426,8 @@ mod tests {
         assert!(!is_err_dash);
         assert_eq!(out_dash, "No matching AST patterns found to rewrite.");
 
-        // Verify that invalid path options like --help are rejected upfront by regex
+        // Verify that invalid path options like --help are rejected upfront by
+        // regex
         let args_path_dash = json!({
             "pattern": "foo",
             "rewrite": "bar",

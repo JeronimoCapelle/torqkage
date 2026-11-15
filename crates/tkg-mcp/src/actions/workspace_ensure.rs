@@ -26,7 +26,8 @@ pub(crate) fn execute(
         ));
     }
 
-    // Evaluate mandatory pre-launch quality gates if declared by the target agent
+    // Evaluate mandatory pre-launch quality gates if declared by the target
+    // agent
     tkg_common::subagent_gate::check_subagent_admission(workspace_root, agent)?;
 
     match JujutsuWorkspace::ensure_agent_workspace(workspace_root, agent) {

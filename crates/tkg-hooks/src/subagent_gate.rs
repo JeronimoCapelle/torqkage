@@ -1,4 +1,5 @@
-//! Pre-tool gate for `invoke_subagent` calls validating declared `pre_launch_checks`.
+//! Pre-tool gate for `invoke_subagent` calls validating declared
+//! `pre_launch_checks`.
 
 use serde_json::Value;
 use tkg_common::{PreToolResponse, PreToolUseInput};
@@ -7,10 +8,11 @@ use crate::stdin;
 
 /// Executes the `check-subagent` command.
 ///
-/// Inspects incoming `PreToolUseInput` on `stdin`. If the tool call is `invoke_subagent`,
-/// it parses the target agent's declared `pre_launch_checks` and executes all specified gates.
-/// If any check fails, it outputs a blocking `PreToolResponse::deny` payload.
-/// Otherwise, outputs `PreToolResponse::allow`.
+/// Inspects incoming `PreToolUseInput` on `stdin`. If the tool call is
+/// `invoke_subagent`, it parses the target agent's declared `pre_launch_checks`
+/// and executes all specified gates. If any check fails, it outputs a blocking
+/// `PreToolResponse::deny` payload. Otherwise, outputs
+/// `PreToolResponse::allow`.
 pub(crate) fn execute() -> std::process::ExitCode {
     let input = stdin::read_pre_tool_use_input();
     let root = input.common.resolve_workspace_root();

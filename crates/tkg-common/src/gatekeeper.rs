@@ -1,6 +1,7 @@
 //! # gatekeeper
 //!
-//! Modular quality gatekeeper and pre-flight validation rules for specialized agents.
+//! Modular quality gatekeeper and pre-flight validation rules for specialized
+//! agents.
 
 use std::{path::Path, process::Command};
 
@@ -120,7 +121,8 @@ impl GateCheck for ProjectGateCheck {
     }
 }
 
-/// Validates that no unresolved VCS merge conflict markers exist in the working copy.
+/// Validates that no unresolved VCS merge conflict markers exist in the working
+/// copy.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VcsConflictCheck;
 
@@ -232,8 +234,9 @@ impl GateCheck for WorkspaceCleanCheck {
 /// - Any quality gate configured dynamically in `project.toml [gates.<name>]`
 ///
 /// Fallback behavior:
-/// - If a gate is required by an agent manifest but not configured in `project.toml`,
-///   admission fails with a descriptive error. No language-specific commands are assumed.
+/// - If a gate is required by an agent manifest but not configured in
+///   `project.toml`, admission fails with a descriptive error. No
+///   language-specific commands are assumed.
 ///
 /// # Errors
 /// Returns a list of blocking failure diagnostics if any mandatory check fails.

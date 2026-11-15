@@ -4,8 +4,9 @@ use std::path::Path;
 
 /// Executes the working copy modification detector.
 ///
-/// Discovers working tree changes and tracks cache state via canonical [`tkg_common::wip::check_wip_changes`].
-/// Returns a concise status message and whether an error condition occurred (`false`).
+/// Discovers working tree changes and tracks cache state via canonical
+/// [`tkg_common::wip::check_wip_changes`]. Returns a concise status message and
+/// whether an error condition occurred (`false`).
 pub(crate) fn execute(workspace_root: &Path, arguments: &serde_json::Value) -> (String, bool) {
     let conversation_id = arguments
         .get("conversation_id")

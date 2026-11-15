@@ -51,7 +51,8 @@ pub struct CommonHookPayload {
 }
 
 impl CommonHookPayload {
-    /// Resolves the canonical workspace root from `workspace_paths` or the current working directory.
+    /// Resolves the canonical workspace root from `workspace_paths` or the
+    /// current working directory.
     #[must_use]
     pub fn resolve_workspace_root(&self) -> PathBuf {
         if let Some(first_path) = self.workspace_paths.first() {
@@ -154,7 +155,8 @@ pub struct PostToolUseInput {
     pub common: CommonHookPayload,
 }
 
-/// Empty response emitted on `stdout` when no action or state change is returned.
+/// Empty response emitted on `stdout` when no action or state change is
+/// returned.
 #[allow(
     clippy::empty_structs_with_brackets,
     reason = "Explicit empty object {} required by ProtoJSON"
@@ -171,7 +173,8 @@ pub struct SystemMessagePayload {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Injectable step for `SessionStart`, `PreInvocation`, and `PostInvocation` hooks.
+/// Injectable step for `SessionStart`, `PreInvocation`, and `PostInvocation`
+/// hooks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum InjectStep {
@@ -338,7 +341,8 @@ pub struct StopResponse {
 }
 
 impl StopResponse {
-    /// Constructs a response permitting the execution loop to terminate cleanly (`{}`).
+    /// Constructs a response permitting the execution loop to terminate cleanly
+    /// (`{}`).
     #[must_use]
     pub const fn allow() -> Self {
         Self {
@@ -382,7 +386,8 @@ impl HandoffRecord {
         }
     }
 
-    /// Formats the handoff record into a clean Markdown block for `.tkg/state/last_handoff.md`.
+    /// Formats the handoff record into a clean Markdown block for
+    /// `.tkg/state/last_handoff.md`.
     #[must_use]
     pub fn to_markdown(&self) -> String {
         let files = if self.modified_files.is_empty() {
@@ -543,7 +548,8 @@ impl CircuitBreakerLedger {
     }
 
     /// Loads the circuit breaker state from `.tkg/state/circuit_breaker.json`.
-    /// Returns a clean ledger with 0 failures if the file does not exist or is invalid.
+    /// Returns a clean ledger with 0 failures if the file does not exist or is
+    /// invalid.
     #[must_use]
     pub fn load(workspace_root: &Path) -> Self {
         let path = crate::state::TkgStatePaths::new(workspace_root).circuit_breaker_file();
@@ -567,7 +573,8 @@ impl CircuitBreakerLedger {
         crate::state::atomic_write(&dir.join(Self::FILE_NAME), data.as_bytes())
     }
 
-    /// Records a successful verification / compiler pass, resetting consecutive failures to 0.
+    /// Records a successful verification / compiler pass, resetting consecutive
+    /// failures to 0.
     ///
     /// # Errors
     /// Returns `io::Error` if saving fails.
@@ -586,7 +593,8 @@ impl CircuitBreakerLedger {
     }
 
     /// Records a failed compilation or verification attempt.
-    /// Increments consecutive failures and trips the breaker if `failures >= max_strikes`.
+    /// Increments consecutive failures and trips the breaker if `failures >=
+    /// max_strikes`.
     ///
     /// # Errors
     /// Returns `io::Error` if saving fails.
@@ -632,8 +640,9 @@ impl CircuitBreakerLedger {
     }
 }
 
-/// Extracts a failure or error signature from tool output, guided by optional custom prefix,
-/// falling back to bracketed codes or lines beginning with error/fail.
+/// Extracts a failure or error signature from tool output, guided by optional
+/// custom prefix, falling back to bracketed codes or lines beginning with
+/// error/fail.
 #[must_use]
 pub fn extract_compiler_error_signature(
     output: &str,
@@ -672,7 +681,8 @@ pub fn extract_compiler_error_signature(
     None
 }
 
-/// Extracts the first bracketed compiler error code (e.g., "[E0502]", "[syntax-error]") from compiler output.
+/// Extracts the first bracketed compiler error code (e.g., "[E0502]",
+/// "[syntax-error]") from compiler output.
 #[must_use]
 pub fn extract_bracketed_error_code(output: &str) -> Option<String> {
     for line in output.lines() {
@@ -900,7 +910,8 @@ mod tests {
             Some("E0308".to_owned())
         );
 
-        // 3. Generic failure line fallback without prefix or brackets (e.g. Vitest / Jest)
+        // 3. Generic failure line fallback without prefix or brackets (e.g.
+        //    Vitest / Jest)
         let vitest_output = "FAIL  src/tests/auth.test.ts\n  ✕ should validate login tokens";
         assert_eq!(
             extract_compiler_error_signature(vitest_output, None),
