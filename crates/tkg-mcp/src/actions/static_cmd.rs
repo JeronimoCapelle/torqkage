@@ -47,12 +47,60 @@ mod tests {
     use super::*;
     use crate::models::OutputCapture;
 
+    fn echo_cmd(msg: &str) -> Vec<String> {
+        #[cfg(unix)]
+        {
+            vec!["echo".to_owned(), msg.to_owned()]
+        }
+        #[cfg(windows)]
+        {
+            vec![
+                "cmd".to_owned(),
+                "/C".to_owned(),
+                "echo".to_owned(),
+                msg.to_owned(),
+            ]
+        }
+    }
+
+    fn true_cmd() -> Vec<String> {
+        #[cfg(unix)]
+        {
+            vec!["true".to_owned()]
+        }
+        #[cfg(windows)]
+        {
+            vec![
+                "cmd".to_owned(),
+                "/C".to_owned(),
+                "exit".to_owned(),
+                "0".to_owned(),
+            ]
+        }
+    }
+
+    fn exit_101_cmd() -> Vec<String> {
+        #[cfg(unix)]
+        {
+            vec!["sh".to_owned(), "-c".to_owned(), "exit 101".to_owned()]
+        }
+        #[cfg(windows)]
+        {
+            vec![
+                "cmd".to_owned(),
+                "/C".to_owned(),
+                "exit".to_owned(),
+                "101".to_owned(),
+            ]
+        }
+    }
+
     #[test]
     fn test_static_command_echo() {
         let root = std::env::temp_dir();
         let tool = ToolDefinition {
             name: "echo_test".to_owned(),
-            command: vec!["echo".to_owned(), "hello_systems".to_owned()],
+            command: echo_cmd("hello_systems"),
             output_capture: OutputCapture::Stdout,
             ..Default::default()
         };
@@ -67,7 +115,7 @@ mod tests {
         let root = std::env::temp_dir();
         let tool = ToolDefinition {
             name: "test_conflicts_fallback".to_owned(),
-            command: vec!["true".to_owned()],
+            command: true_cmd(),
             output_capture: OutputCapture::Stdout,
             empty_fallback: Some("Clean (0 merge/rebase conflicts detected)".to_owned()),
             ..Default::default()
@@ -81,10 +129,9 @@ mod tests {
     #[test]
     fn test_static_command_success_exit_codes() {
         let root = std::env::temp_dir();
-        // sh -c "exit 101" simulates non-zero compiler check exit
         let tool = ToolDefinition {
             name: "test_exit_code".to_owned(),
-            command: vec!["sh".to_owned(), "-c".to_owned(), "exit 101".to_owned()],
+            command: exit_101_cmd(),
             output_capture: OutputCapture::ExitCodeOnly,
             success_exit_codes: vec![0, 101],
             ..Default::default()

@@ -143,10 +143,14 @@ mod tests {
 
     #[test]
     fn test_validator_warning_on_json_spans() {
+        #[cfg(unix)]
+        let cmd = vec!["echo".to_owned()];
+        #[cfg(windows)]
+        let cmd = vec!["cmd".to_owned()];
         let tools = vec![ToolDefinition {
             name: "custom_cmd".to_owned(),
             action: ToolAction::StaticCommand,
-            command: vec!["echo".to_owned()],
+            command: cmd,
             output_capture: OutputCapture::JsonSpans,
             ..Default::default()
         }];

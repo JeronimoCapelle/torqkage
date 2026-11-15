@@ -325,10 +325,19 @@ mod tests {
     #[test]
     fn test_unified_custom_check_fails() {
         let mut config = HooksConfig::default();
+        #[cfg(unix)]
+        let check_cmd = vec!["echo".to_owned(), "DISK_FULL".to_owned()];
+        #[cfg(windows)]
+        let check_cmd = vec![
+            "cmd".to_owned(),
+            "/C".to_owned(),
+            "echo".to_owned(),
+            "DISK_FULL".to_owned(),
+        ];
         config.pre_tool_use.custom_checks.push(CustomCheck {
             name: "test_check".to_owned(),
             matcher: "read_project_file".to_owned(),
-            command: vec!["echo".to_owned(), "DISK_FULL".to_owned()],
+            command: check_cmd,
             fail_if_output_contains: Some("DISK_FULL".to_owned()),
             decision: HookDecision::Deny,
             reason: "Simulated custom check failure".to_owned(),
@@ -401,10 +410,19 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
 
         // PreToolUse custom check triggers purely via declarative require_gates
         let mut config = HooksConfig::default();
+        #[cfg(unix)]
+        let sentinel_cmd = vec!["echo".to_owned(), "GATE_TRIGGERED".to_owned()];
+        #[cfg(windows)]
+        let sentinel_cmd = vec![
+            "cmd".to_owned(),
+            "/C".to_owned(),
+            "echo".to_owned(),
+            "GATE_TRIGGERED".to_owned(),
+        ];
         config.pre_tool_use.custom_checks.push(CustomCheck {
             name: "custom_sentinel".to_owned(),
             matcher: String::new(),
-            command: vec!["echo".to_owned(), "GATE_TRIGGERED".to_owned()],
+            command: sentinel_cmd,
             fail_if_output_contains: Some("GATE_TRIGGERED".to_owned()),
             decision: HookDecision::Deny,
             reason: "Custom sentinel gate blocked execution".to_owned(),

@@ -289,12 +289,23 @@ mod tests {
         dir
     }
 
+    fn echo_cmd() -> Vec<String> {
+        #[cfg(unix)]
+        {
+            vec!["echo".to_owned()]
+        }
+        #[cfg(windows)]
+        {
+            vec!["cmd".to_owned(), "/C".to_owned(), "echo".to_owned()]
+        }
+    }
+
     #[test]
     fn test_parameterized_cmd_echo() {
         let temp = create_test_dir("echo");
         let tool = ToolDefinition {
             name: "test_echo".to_owned(),
-            command: vec!["echo".to_owned()],
+            command: echo_cmd(),
             args: vec![
                 ToolArg {
                     name: "msg".to_owned(),
@@ -333,7 +344,7 @@ mod tests {
         let temp = create_test_dir("inject");
         let tool = ToolDefinition {
             name: "test_echo".to_owned(),
-            command: vec!["echo".to_owned()],
+            command: echo_cmd(),
             args: vec![ToolArg {
                 name: "target".to_owned(),
                 required: true,
@@ -434,7 +445,7 @@ mod tests {
         let temp = create_test_dir("default_arg");
         let tool = ToolDefinition {
             name: "test_default".to_owned(),
-            command: vec!["echo".to_owned()],
+            command: echo_cmd(),
             args: vec![
                 ToolArg {
                     name: "msg".to_owned(),
@@ -473,7 +484,7 @@ mod tests {
         let temp = create_test_dir("switch_and_num");
         let tool = ToolDefinition {
             name: "test_switch".to_owned(),
-            command: vec!["echo".to_owned()],
+            command: echo_cmd(),
             args: vec![
                 ToolArg {
                     name: "lib".to_owned(),
@@ -512,7 +523,7 @@ mod tests {
         let temp = create_test_dir("sandbox_outer");
         let tool = ToolDefinition {
             name: "test_sandboxed_echo".to_owned(),
-            command: vec!["echo".to_owned()],
+            command: echo_cmd(),
             sandbox: tkg_common::tools::ToolSandboxPolicy {
                 enforce_sandbox: true,
                 allow_host_fallback: true,
@@ -546,7 +557,7 @@ mod tests {
         let temp = create_test_dir("sandbox_closed");
         let tool = ToolDefinition {
             name: "test_closed_echo".to_owned(),
-            command: vec!["echo".to_owned()],
+            command: echo_cmd(),
             sandbox: tkg_common::tools::ToolSandboxPolicy {
                 enforce_sandbox: true,
                 ..Default::default()
@@ -726,7 +737,7 @@ mod tests {
         let temp = create_test_dir("conflicts");
         let tool = ToolDefinition {
             name: "test_cargo".to_owned(),
-            command: vec!["echo".to_owned()],
+            command: echo_cmd(),
             args: vec![
                 ToolArg {
                     name: "bin".to_owned(),
@@ -781,7 +792,7 @@ mod tests {
         let temp = create_test_dir("enum");
         let tool = ToolDefinition {
             name: "test_strategy".to_owned(),
-            command: vec!["echo".to_owned()],
+            command: echo_cmd(),
             args: vec![ToolArg {
                 name: "strategy".to_owned(),
                 enum_values: vec!["rebase".to_owned(), "squash".to_owned()],
