@@ -35,6 +35,7 @@
 
 pub mod cascade;
 pub mod content_filter;
+pub mod diagnostics;
 pub mod error;
 pub mod frontmatter;
 pub mod gatekeeper;

@@ -240,10 +240,6 @@ fn search_single_file(
         .line_number(true)
         .build();
 
-    #[allow(
-        clippy::print_stderr,
-        reason = "Log non-fatal file search read errors instead of dropping silently"
-    )]
     if let Err(err) = searcher.search_path(
         matcher,
         file_path,
@@ -253,10 +249,7 @@ fn search_single_file(
             Ok(collected_matches.len() < MAX_SEARCH_MATCHES)
         }),
     ) {
-        eprintln!(
-            "[tkg-mcp] warning: failed searching '{}': {err}",
-            file_path.display()
-        );
+        tracing::warn!(path = %file_path.display(), "Failed searching file: {err}");
     }
 }
 

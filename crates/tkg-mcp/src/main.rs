@@ -45,27 +45,32 @@ use tkg_common::WorkspaceResolver;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let (workspace_root, config_path, agent_name) = resolve_workspace_and_config();
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = tkg_common::diagnostics::init_stderr_tracing(
+        &raw_args,
+        tkg_common::diagnostics::DefaultVerbosity::Info,
+    );
+    let (workspace_root, config_path, agent_name) = resolve_workspace_and_config(&args);
 
-    eprintln!("[tkg-mcp] Workspace root: '{}'", workspace_root.display());
-    eprintln!(
-        "[tkg-mcp] Loading declarative tools configuration from '{}'...",
-        config_path.display()
+    tracing::info!(workspace = %workspace_root.display(), "[tkg-mcp] Workspace root");
+    tracing::info!(
+        config = %config_path.display(),
+        "[tkg-mcp] Loading declarative tools configuration..."
     );
 
     let loaded_config = match config::load_full_config_from_path(&config_path) {
         Ok(t) => t,
         Err(err) => {
-            eprintln!("🛑 [tkg-mcp] Startup failure: {err}");
+            tracing::error!("🛑 [tkg-mcp] Startup failure: {err}");
             return ExitCode::FAILURE;
         },
     };
 
     let report = validator::validate_tools(&loaded_config.tools);
-    eprintln!("{}", report.summary());
+    tracing::info!("{}", report.summary());
 
     for warning in report.warnings {
-        eprintln!("[tkg-mcp] Warning: {warning}");
+        tracing::warn!("[tkg-mcp] {warning}");
     }
 
     let guards = agent_scope::resolve_agent_guards(&workspace_root, agent_name.as_deref());
@@ -73,15 +78,14 @@ async fn main() -> ExitCode {
     let server = McpServer::new(loaded_config.tools, workspace_root, agent_name, guards);
 
     if let Err(err) = server.run_stdio().await {
-        eprintln!("🛑 [tkg-mcp] Stdio loop error: {err}");
+        tracing::error!("🛑 [tkg-mcp] Stdio loop error: {err}");
         return ExitCode::FAILURE;
     }
 
     ExitCode::SUCCESS
 }
 
-fn resolve_workspace_and_config() -> (PathBuf, PathBuf, Option<String>) {
-    let args: Vec<String> = std::env::args().collect();
+fn resolve_workspace_and_config(args: &[String]) -> (PathBuf, PathBuf, Option<String>) {
     let mut custom_config = None;
     let mut custom_workspace = None;
 
@@ -110,23 +114,23 @@ fn resolve_workspace_and_config() -> (PathBuf, PathBuf, Option<String>) {
     let config_path = custom_config.unwrap_or_else(|| {
         if let Some(found) = tkg_common::harness::find_tools_toml(&workspace_root) {
             if !found.starts_with(&workspace_root) {
-                eprintln!(
-                    "[tkg-mcp] Notice: Using installed plugin configuration: {}",
-                    found.display()
+                tracing::info!(
+                    path = %found.display(),
+                    "[tkg-mcp] Using installed plugin configuration"
                 );
             }
             return found;
         }
 
         let fallback = workspace_root.join("tools.toml");
-        eprintln!(
-            "[tkg-mcp] Advisory: No tools.toml found in workspace or plugins; defaulting to {}",
-            fallback.display()
+        tracing::warn!(
+            path = %fallback.display(),
+            "[tkg-mcp] No tools.toml found in workspace or plugins; using fallback"
         );
         fallback
     });
 
-    let agent_name = agent_scope::resolve_agent_scope(&args, &workspace_root);
+    let agent_name = agent_scope::resolve_agent_scope(args, &workspace_root);
 
     (workspace_root, config_path, agent_name)
 }

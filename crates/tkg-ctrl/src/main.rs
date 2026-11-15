@@ -61,7 +61,11 @@ use tkg_common::WorkspaceResolver;
 use crate::app::{ActiveTab, App, FleetFocus};
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().collect();
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = tkg_common::diagnostics::init_stderr_tracing(
+        &raw_args,
+        tkg_common::diagnostics::DefaultVerbosity::Warn,
+    );
     let command = args.get(1).map(String::as_str);
 
     let workspace_root = WorkspaceResolver::find_root(None).unwrap_or_else(|_| PathBuf::from("."));

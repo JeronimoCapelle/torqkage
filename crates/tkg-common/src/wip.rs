@@ -75,10 +75,6 @@ impl WipCheckResult {
 /// If modified, records the new hash in the session cache and returns the list
 /// of modified files.
 #[must_use]
-#[allow(
-    clippy::print_stderr,
-    reason = "Emits non-fatal warning if WIP cache file update fails"
-)]
 pub fn check_wip_changes(
     workspace_root: &Path,
     conversation_id: Option<&str>,
@@ -109,10 +105,10 @@ pub fn check_wip_changes(
     if let Some(parent) = cache_file.parent()
         && let Err(err) = std::fs::create_dir_all(parent)
     {
-        eprintln!("tkg: warning: failed to create WIP cache parent directory: {err}");
+        tracing::warn!("Failed to create WIP cache parent directory: {err}");
     }
     if let Err(err) = std::fs::write(&cache_file, format!("{current_hash}")) {
-        eprintln!("tkg: warning: failed to update WIP cache file: {err}");
+        tracing::warn!("Failed to update WIP cache file: {err}");
     }
 
     let total_count = trimmed.lines().count();

@@ -99,15 +99,10 @@ impl App {
     /// `workspace_root`.
     pub(crate) fn new(workspace_root: PathBuf) -> Result<Self, String> {
         let tools = if let Some(path) = find_tools_config_path(&workspace_root) {
-            eprintln!(
-                "[tkg] Notice: Loaded tools configuration from: {}",
-                path.display()
-            );
+            tracing::debug!(path = %path.display(), "Loaded tools configuration");
             load_tools_from_file(&path)?
         } else {
-            eprintln!(
-                "[tkg] Advisory: No tools.toml found across workspace, .tkg, plugins, or user config."
-            );
+            tracing::warn!("No tools.toml found across workspace, .tkg, plugins, or user config.");
             Vec::new()
         };
 

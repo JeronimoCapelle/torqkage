@@ -45,7 +45,11 @@ mod wip;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().collect();
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = tkg_common::diagnostics::init_stderr_tracing(
+        &raw_args,
+        tkg_common::diagnostics::DefaultVerbosity::Warn,
+    );
     let command = args.get(1).map_or("help", String::as_str);
 
     match command {

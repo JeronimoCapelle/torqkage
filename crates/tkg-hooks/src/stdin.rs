@@ -76,7 +76,7 @@ fn read_stdin_context<T: Default>(
     match parse(harness.hook_dialect(), &raw) {
         Ok(val) => (val, claude_payload),
         Err(err) => {
-            eprintln!("tkg-hooks: warning: failed to parse {label} stdin payload: {err}");
+            tracing::warn!(hook = label, "Failed to parse stdin payload: {err}");
             (T::default(), claude_payload)
         },
     }

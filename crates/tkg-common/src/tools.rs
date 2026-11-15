@@ -768,13 +768,9 @@ impl RawToolsConfig {
     /// Loads and merges `tools.toml` configurations across all candidate
     /// directories for `root`.
     #[must_use]
-    #[allow(
-        clippy::print_stderr,
-        reason = "Emits configuration parse diagnostics when loading tools.toml"
-    )]
     pub fn load_merged(root: &std::path::Path) -> Self {
         Self::try_load_merged(root).unwrap_or_else(|err| {
-            eprintln!("tkg: error: {err}");
+            tracing::error!("Failed to load tools.toml: {err}");
             Self::default()
         })
     }

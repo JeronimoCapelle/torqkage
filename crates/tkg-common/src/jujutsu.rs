@@ -75,14 +75,10 @@ impl JujutsuWorkspace {
 
     /// Checks if an isolated workspace has zero uncommitted changes.
     #[must_use]
-    #[allow(
-        clippy::print_stderr,
-        reason = "Advisory notice when jj binary is absent"
-    )]
     pub fn is_workspace_clean(ws_path: &Path) -> bool {
         if !is_jj_in_path() {
-            eprintln!(
-                "[tkg-common] Advisory: 'jj' (Jujutsu) CLI not found in PATH; cannot check workspace clean state."
+            tracing::warn!(
+                "'jj' (Jujutsu) CLI not found in PATH; cannot check workspace clean state."
             );
             return false;
         }
@@ -127,14 +123,10 @@ impl JujutsuWorkspace {
     /// # Errors
     /// Returns `TkgError` if Jujutsu is not installed, not initialized, or
     /// workspace creation fails.
-    #[allow(
-        clippy::print_stderr,
-        reason = "Diagnostic advisories when Jujutsu or Git prerequisites are missing"
-    )]
     fn verify_jj_prerequisites(repo_root: &Path) -> Result<()> {
         if !is_jj_in_path() {
-            eprintln!(
-                "[tkg-common] Advisory: 'jj' (Jujutsu) CLI not found in PATH; cannot initialize isolated agent workspace."
+            tracing::warn!(
+                "'jj' (Jujutsu) CLI not found in PATH; cannot initialize isolated agent workspace."
             );
             return Err(TkgError::Process(
                 "Jujutsu 'jj' CLI binary not found in PATH".to_owned(),
@@ -143,36 +135,26 @@ impl JujutsuWorkspace {
 
         if !Self::is_jj_repo(repo_root) {
             if repo_root.join(".git").exists() {
-                eprintln!(
-                    "[tkg-common] Advisory: Target workspace '{}' is a Git repository without Jujutsu colocation.\n\
-                     Run 'jj git init --colocate' in the repository root to enable isolated agent workspaces.",
-                    repo_root.display()
-                );
-                return Err(TkgError::Workspace(format!(
+                let msg = format!(
                     "Target workspace '{}' is a Git repository without Jujutsu colocation. \
                      Run 'jj git init --colocate' in the repository root to enable isolated agent workspaces.",
                     repo_root.display()
-                )));
+                );
+                tracing::warn!("{msg}");
+                return Err(TkgError::Workspace(msg));
             }
-            eprintln!(
-                "[tkg-common] Advisory: Target workspace '{}' is not a Jujutsu repository (.jj not found).\n\
+            let msg = format!(
+                "Target workspace '{}' is not a Jujutsu repository (.jj not found). \
                  Run 'jj git init --colocate' (for Git projects) or 'jj init' to enable isolated agent workspaces.",
                 repo_root.display()
             );
-            return Err(TkgError::Workspace(format!(
-                "Target workspace '{}' is not a Jujutsu repository (.jj not found). \
-                 Run 'jj git init --colocate' or 'jj init' to enable isolated agent workspaces.",
-                repo_root.display()
-            )));
+            tracing::warn!("{msg}");
+            return Err(TkgError::Workspace(msg));
         }
 
         Ok(())
     }
 
-    #[allow(
-        clippy::print_stderr,
-        reason = "Diagnostic logging for subprocess rebase warnings"
-    )]
     fn create_or_sync_workspace(repo_root: &Path, agent_ws_path: &Path, agent: &str) -> Result<()> {
         if !Self::workspace_exists(repo_root, agent) {
             let dest_str = agent_ws_path.to_str().unwrap_or(agent);
@@ -205,16 +187,16 @@ impl JujutsuWorkspace {
             cmd.current_dir(agent_ws_path);
             match SubprocessSupervisor::run_supervised(cmd, DEFAULT_VCS_QUERY_TIMEOUT_SECS) {
                 Ok(out) if !out.status.success() => {
-                    eprintln!(
-                        "[tkg-common] warning: 'jj new default@' in {} exited with non-zero status: {}",
-                        agent_ws_path.display(),
-                        out.status
+                    tracing::warn!(
+                        workspace = %agent_ws_path.display(),
+                        status = %out.status,
+                        "'jj new default@' exited with non-zero status"
                     );
                 },
                 Err(e) => {
-                    eprintln!(
-                        "[tkg-common] warning: failed to execute 'jj new default@' in {}: {e}",
-                        agent_ws_path.display()
+                    tracing::warn!(
+                        workspace = %agent_ws_path.display(),
+                        "Failed to execute 'jj new default@': {e}"
                     );
                 },
                 _ => {},
@@ -224,7 +206,6 @@ impl JujutsuWorkspace {
         Ok(())
     }
 
-    #[allow(clippy::print_stderr, reason = "Diagnostic logging for symlink errors")]
     fn link_shared_build_caches(repo_root: &Path, agent_ws_path: &Path) {
         let project = crate::project::ProjectConfig::detect_or_load(repo_root);
         for cache_name in project.all_ignored_or_cache_paths() {
@@ -236,18 +217,18 @@ impl JujutsuWorkspace {
                     if let Some(parent) = ws_cache.parent()
                         && let Err(e) = std::fs::create_dir_all(parent)
                     {
-                        eprintln!(
-                            "[tkg-common] warning: failed to create cache parent directory {}: {e}",
-                            parent.display()
+                        tracing::warn!(
+                            dir = %parent.display(),
+                            "Failed to create cache parent directory: {e}"
                         );
                     }
                     if let Err(e) = std::os::unix::fs::symlink(&root_cache, &ws_cache)
                         && e.kind() != std::io::ErrorKind::AlreadyExists
                     {
-                        eprintln!(
-                            "[tkg-common] warning: failed to symlink cache directory from {} to {}: {e}",
-                            root_cache.display(),
-                            ws_cache.display()
+                        tracing::warn!(
+                            src = %root_cache.display(),
+                            dst = %ws_cache.display(),
+                            "Failed to symlink cache directory: {e}"
                         );
                     }
                 }
@@ -294,10 +275,6 @@ impl JujutsuWorkspace {
     ///
     /// # Errors
     /// Returns `TkgError` if workspace forget fails.
-    #[allow(
-        clippy::print_stderr,
-        reason = "Diagnostic logging for subprocess errors"
-    )]
     pub fn forget_agent_workspace(workspace_root: &Path, agent: &str) -> Result<()> {
         let ws_path = crate::state::TkgStatePaths::new(workspace_root).agent_workspace(agent);
         if Self::workspace_exists(workspace_root, agent) {
@@ -311,8 +288,10 @@ impl JujutsuWorkspace {
                     ))
                 })?;
             if !status.success() {
-                eprintln!(
-                    "[tkg-common] warning: 'jj workspace forget {agent}' exited with non-zero status: {status}"
+                tracing::warn!(
+                    agent = agent,
+                    status = %status,
+                    "'jj workspace forget' exited with non-zero status"
                 );
             }
         }
@@ -766,10 +745,6 @@ impl JujutsuWorkspace {
     }
 }
 
-#[allow(
-    clippy::print_stderr,
-    reason = "Diagnostic logging for best-effort VCS snapshot"
-)]
 fn snapshot_workspace(ws_path: &Path) {
     let mut status_cmd = Command::new("jj");
     status_cmd.args(["--color=never", "status"]);
@@ -777,10 +752,7 @@ fn snapshot_workspace(ws_path: &Path) {
     if let Err(err) =
         SubprocessSupervisor::run_supervised(status_cmd, DEFAULT_VCS_QUERY_TIMEOUT_SECS)
     {
-        eprintln!(
-            "[tkg-common] warning: failed to snapshot workspace {}: {err}",
-            ws_path.display()
-        );
+        tracing::warn!(workspace = %ws_path.display(), "Failed to snapshot workspace: {err}");
     }
 }
 
@@ -809,10 +781,6 @@ fn query_current_op_id(repo_root: &Path) -> Option<String> {
         .filter(|id| !id.is_empty())
 }
 
-#[allow(
-    clippy::print_stderr,
-    reason = "Diagnostic logging for best-effort VCS rollback"
-)]
 fn restore_op(repo_root: &Path, op_id: Option<&str>) {
     if let Some(id) = op_id {
         let mut restore_cmd = Command::new("jj");
@@ -820,13 +788,14 @@ fn restore_op(repo_root: &Path, op_id: Option<&str>) {
         restore_cmd.current_dir(repo_root);
         match SubprocessSupervisor::run_supervised(restore_cmd, DEFAULT_VCS_QUERY_TIMEOUT_SECS) {
             Ok(out) if !out.status.success() => {
-                eprintln!(
-                    "[tkg-common] warning: 'jj op restore {id}' failed: {}",
-                    String::from_utf8_lossy(&out.stderr).trim()
+                tracing::warn!(
+                    op_id = id,
+                    stderr = String::from_utf8_lossy(&out.stderr).trim(),
+                    "'jj op restore' failed"
                 );
             },
             Err(err) => {
-                eprintln!("[tkg-common] warning: failed to run 'jj op restore {id}': {err}");
+                tracing::warn!(op_id = id, "Failed to run 'jj op restore': {err}");
             },
             Ok(_) => {},
         }

@@ -49,7 +49,7 @@ pub(crate) fn execute_record_handoff() -> std::process::ExitCode {
         "Auto",
         config.stop.max_modified_files,
     ) {
-        eprintln!("tkg-hooks: warning: failed to record session handoff: {err}");
+        tracing::warn!("Failed to record session handoff: {err}");
     }
 
     let resp = StopResponse::allow();

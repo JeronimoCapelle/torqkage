@@ -21,7 +21,8 @@ name = "tkg"
 path = "src/main.rs"
 
 [dependencies]
-tkg-common = { workspace = true, features = ["sqlite"] }
+tkg-common = { workspace = true, features = ["sqlite", "diagnostics"] }
+tracing = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 toml = { workspace = true }

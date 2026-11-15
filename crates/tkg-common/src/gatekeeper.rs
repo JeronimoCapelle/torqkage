@@ -291,18 +291,16 @@ pub fn evaluate_pre_flight_checks(
 
 /// Discovers the path to an agent's Markdown specification file.
 #[must_use]
-#[allow(
-    clippy::print_stderr,
-    reason = "Advisory notice when agent manifest is missing"
-)]
 pub fn find_agent_manifest_path(
     workspace_root: &Path,
     agent_name: &str,
 ) -> Option<std::path::PathBuf> {
     let found = crate::frontmatter::find_agent_manifest(workspace_root, agent_name);
     if found.is_none() {
-        eprintln!(
-            "[tkg-common] Advisory: Agent manifest for '{agent_name}' not found across workspace or ~/.gemini/config."
+        tracing::debug!(
+            agent = agent_name,
+            workspace = %workspace_root.display(),
+            "Agent manifest not found across workspace or user harness config"
         );
     }
     found

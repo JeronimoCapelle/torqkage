@@ -48,9 +48,11 @@ impl McpServer {
                     .into_iter()
                     .filter(|t| allowed.contains("*") || allowed.contains(&t.name))
                     .collect();
-                eprintln!(
-                    "[tkg-mcp] Scoped to agent '{name}': exposing {} of {total} tools",
-                    filtered.len()
+                tracing::info!(
+                    agent = %name,
+                    exposed = filtered.len(),
+                    total,
+                    "[tkg-mcp] Scoped toolset to active agent"
                 );
                 (filtered, Some(name))
             },
@@ -119,9 +121,11 @@ impl McpServer {
                 {
                     let resolved = tkg_common::harness::resolve_client_name(client_name);
                     let id = resolved.id().to_owned();
-                    eprintln!(
-                        "[tkg-mcp] Identified MCP caller harness '{id}' (from clientInfo.name='{client_name}', native_hooks={})",
-                        resolved.supports_hooks()
+                    tracing::info!(
+                        harness = %id,
+                        client = client_name,
+                        native_hooks = resolved.supports_hooks(),
+                        "[tkg-mcp] Identified MCP caller harness"
                     );
                     if let Ok(mut guard) = self.detected_harness.write() {
                         *guard = Some(id);
@@ -463,7 +467,7 @@ impl McpServer {
         let mut stdout = tokio::io::stdout();
         let mut reader = BufReader::new(stdin).lines();
 
-        eprintln!("[tkg-mcp] Listening for JSON-RPC 2.0 messages on stdio...");
+        tracing::info!("[tkg-mcp] Listening for JSON-RPC 2.0 messages on stdio...");
 
         while let Some(line) = reader.next_line().await? {
             let trimmed = line.trim();
@@ -483,7 +487,7 @@ impl McpServer {
                     }
                 },
                 Err(err) => {
-                    eprintln!("[tkg-mcp] JSON-RPC parse error: {err}");
+                    tracing::warn!("[tkg-mcp] JSON-RPC parse error: {err}");
                     let error_resp = JsonRpcResponse::error(
                         serde_json::Value::Null,
                         -32700,
@@ -497,16 +501,16 @@ impl McpServer {
             }
         }
 
-        eprintln!("[tkg-mcp] Stdio stream closed, exiting daemon gracefully.");
+        tracing::info!("[tkg-mcp] Stdio stream closed, exiting daemon gracefully.");
         Ok(())
     }
 }
 
 fn handle_notification(req: &JsonRpcRequest) {
     if req.method == "notifications/initialized" {
-        eprintln!("[tkg-mcp] Handshake complete: MCP client successfully connected");
+        tracing::info!("[tkg-mcp] Handshake complete: MCP client successfully connected");
     } else if req.method == "notifications/cancelled" {
-        eprintln!("[tkg-mcp] Received operation cancellation notification from client");
+        tracing::debug!("[tkg-mcp] Received operation cancellation notification from client");
     }
 }
 

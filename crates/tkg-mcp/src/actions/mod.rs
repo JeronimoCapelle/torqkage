@@ -454,9 +454,7 @@ fn update_circuit_breaker(
                         error_sig.as_deref().or(Some("Quality gate failure")),
                         Some(&output),
                     ) {
-                        eprintln!(
-                            "tkg-mcp: warning: failed to record circuit breaker failure: {e}"
-                        );
+                        tracing::warn!("tkg-mcp: failed to record circuit breaker failure: {e}");
                     }
                     if ledger.tripped {
                         let banner = format!(
@@ -474,7 +472,7 @@ fn update_circuit_breaker(
                     }
                 }
             } else if let Err(e) = ledger.record_success(workspace_root, Some(&tool.name)) {
-                eprintln!("tkg-mcp: warning: failed to record circuit breaker success: {e}");
+                tracing::warn!("tkg-mcp: failed to record circuit breaker success: {e}");
             }
             Ok((output, is_error))
         },
@@ -493,7 +491,7 @@ fn update_circuit_breaker(
                     Some(&err),
                 )
             {
-                eprintln!("tkg-mcp: warning: failed to record circuit breaker failure: {e}");
+                tracing::warn!("tkg-mcp: failed to record circuit breaker failure: {e}");
             }
             Err(err)
         },
