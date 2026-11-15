@@ -38,6 +38,7 @@ toml_edit = "0.25"
 
 # Error Handling & Systems Utilities
 thiserror = "2.0"
+bitflags = "2.13"
 which = "8.0"
 command-group = "5.0"
 nix = "0.27"

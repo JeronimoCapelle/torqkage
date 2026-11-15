@@ -1,22 +1,49 @@
 //! # harness
 //!
-//! The [`Harness`] trait is the single seam between `TorqKage` and an agent
-//! execution harness (Antigravity, `OpenCode`, Claude Code, or any custom CLI).
-//! Everything harness-specific that the suite needs to know *statically* —
-//! binary name, CLI flags, directory conventions, environment variables, plugin
-//! install locations — lives in an implementation of this trait.
+//! The [`Harness`] trait is the single capability-driven seam between `TorqKage`
+//! and an agent execution harness (Antigravity, `OpenCode`, Claude Code, Cursor,
+//! or any custom CLI). Every harness concern — static flags and directory
+//! layout, [`HarnessCapabilities`], hook wire dialect ([`HookDialect`]), session
+//! discovery ([`SessionMeta`]), spawn command assembly, and config injection —
+//! lives in an implementation of this trait.
 //!
-//! Adding a new harness means: implement [`Harness`], register it in
-//! [`resolve`] (and [`builtin_harnesses`]), and optionally implement the
-//! behavioural `HarnessDriver` trait in `tkg-ctrl` and the hook dialect in
-//! `tkg-hooks`.
+//! Adding a new harness means: implement [`Harness`] and register it in
+//! [`resolve`] (and [`builtin_harnesses`]).
 //!
 //! This module also hosts harness-neutral configuration discovery used by every
 //! binary.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
-use crate::project::{ProjectConfig, ProjectRunnerConfig};
+use crate::{
+    error::TkgError,
+    harness_install,
+    hook_dialect::{CLAUDE_CODE_DIALECT, HookDialect, PROTO_JSON_DIALECT},
+    project::{ProjectConfig, ProjectRunnerConfig},
+    sessions::{
+        SessionMeta, discover_claude_sessions_in, discover_generic_state_sessions,
+        discover_opencode_sessions,
+    },
+};
+
+bitflags::bitflags! {
+    /// Capabilities advertised by an execution harness.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct HarnessCapabilities: u32 {
+        /// Harness supports external lifecycle hooks (`PreToolUse`, `Stop`, `SessionStart`).
+        const NATIVE_HOOKS   = 1 << 0;
+        /// Harness persists and can resume prior conversation sessions.
+        const SESSION_RESUME = 1 << 1;
+        /// Harness supports headless / non-interactive CLI spawning.
+        const HEADLESS_SPAWN = 1 << 2;
+        /// Harness supports workspace MCP server registration.
+        const NATIVE_MCP     = 1 << 3;
+    }
+}
 
 /// Plugin bundle directory name used under every harness plugin root.
 pub const BUNDLE_NAME: &str = "torqkage";
@@ -28,7 +55,8 @@ pub fn local_plugin_rel_dir() -> PathBuf {
 }
 
 /// Infers an execution harness identifier from environment variables or
-/// harness-specific workspace directories (`.claude`, `.opencode`, `.gemini`).
+/// harness-specific workspace directories (`.claude`, `.opencode`, `.gemini`,
+/// or `.cursor/mcp.json`).
 #[must_use]
 pub fn detect_workspace_harness(workspace_root: &Path) -> Option<&'static str> {
     if std::env::var_os("CLAUDE_PROJECT_DIR").is_some() || workspace_root.join(".claude").is_dir() {
@@ -40,14 +68,28 @@ pub fn detect_workspace_harness(workspace_root: &Path) -> Option<&'static str> {
     if workspace_root.join(".gemini").is_dir() {
         return Some("agy");
     }
+    if workspace_root.join(".cursor").join("mcp.json").is_file() {
+        return Some("cursor");
+    }
     None
 }
 
-/// Static description of an agent execution harness.
+/// Unified capability-driven contract for an agent execution harness.
 pub trait Harness: Send + Sync + std::fmt::Debug {
-    /// Canonical lowercase identifier (`agy`, `opencode`, `claude`, or the
-    /// custom slug).
+    /// Canonical lowercase identifier (`agy`, `opencode`, `claude`, `cursor`,
+    /// or the custom slug).
     fn id(&self) -> &str;
+
+    /// Human-readable display label shown in status diagnostics.
+    fn display_name(&self) -> &str {
+        self.id()
+    }
+
+    /// Advertised capability bitset controlling hooks, session discovery,
+    /// spawning, and config injection.
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::HEADLESS_SPAWN | HarnessCapabilities::NATIVE_MCP
+    }
 
     /// Default executable name.
     fn default_binary(&self) -> String {
@@ -123,7 +165,124 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
     /// (`PreToolUse`, `Stop`, `SessionStart`). Harnesses returning `false` rely
     /// on `TorqKage`'s universal in-band MCP seatbelt.
     fn supports_hooks(&self) -> bool {
-        false
+        self.capabilities()
+            .contains(HarnessCapabilities::NATIVE_HOOKS)
+    }
+
+    /// Hook wire-protocol dialect used for parsing `stdin` and formatting
+    /// `stdout` payloads.
+    fn hook_dialect(&self) -> &'static dyn HookDialect {
+        &PROTO_JSON_DIALECT
+    }
+
+    /// Discovers prior sessions for `agent_name` in `workspace_root`.
+    ///
+    /// # Errors
+    /// Returns [`TkgError`] if backend session lookup encounters an unrecoverable
+    /// failure.
+    fn discover_sessions(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionMeta>, TkgError> {
+        Ok(discover_generic_state_sessions(agent_name, workspace_root))
+    }
+
+    /// Convenience helper returning the newest resumable session for
+    /// `agent_name` in `workspace_root`.
+    fn latest_session(&self, agent_name: &str, workspace_root: &Path) -> Option<SessionMeta> {
+        self.discover_sessions(agent_name, workspace_root)
+            .ok()
+            .and_then(|mut sessions| sessions.drain(..).next())
+    }
+
+    /// Returns `(config_or_bundle_path, is_installed, is_symlink)` for TUI/CLI
+    /// installation diagnostics.
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = workspace_root.join(".tkg/state/mcp_servers.json");
+        let exists = p.is_file();
+        (p, exists, false)
+    }
+
+    /// Installs or injects MCP server and hook configuration for this harness.
+    ///
+    /// # Errors
+    /// Returns [`TkgError`] if configuration files cannot be parsed or written.
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_custom_mcp_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    /// Constructs the spawn [`Command`] for launching this harness with
+    /// workspace environment, optional agent selection, prompt, resume ID, and
+    /// sandbox flags.
+    fn build_spawn_cmd(
+        &self,
+        _workspace_root: &Path,
+        runner: &ProjectRunnerConfig,
+        agent_name: Option<&str>,
+        prompt: Option<&str>,
+        resume_session_id: Option<&str>,
+        sandbox: bool,
+        env_vars: &BTreeMap<String, String>,
+    ) -> Command {
+        let binary = runner.resolved_binary();
+        let mut cmd = Command::new(&binary);
+
+        for (k, v) in env_vars {
+            cmd.env(k, v);
+        }
+
+        if let Some(custom_cmd) = &runner.command
+            && let Some(sub_args) = custom_cmd.get(1..)
+        {
+            for arg in sub_args {
+                if arg == "{agent}"
+                    && let Some(agent) = agent_name
+                {
+                    cmd.arg(agent);
+                } else if (arg == "{conversation}" || arg == "{session}")
+                    && let Some(cid) = resume_session_id
+                {
+                    cmd.arg(cid);
+                } else if arg == "{prompt}"
+                    && let Some(p) = prompt
+                {
+                    cmd.arg(p);
+                } else {
+                    cmd.arg(arg);
+                }
+            }
+        } else {
+            if sandbox && let Some(flag) = runner.resolved_sandbox_flag() {
+                cmd.arg(flag);
+            }
+            if let Some(conv_id) = resume_session_id {
+                if let Some(flag) = runner.resolved_resume_flag() {
+                    cmd.arg(flag).arg(conv_id);
+                }
+            } else if let Some(agent) = agent_name
+                && let Some(flag) = runner.resolved_agent_flag()
+            {
+                cmd.arg(flag).arg(agent);
+            }
+            if let Some(p) = prompt {
+                cmd.arg(p);
+            }
+        }
+
+        for extra in &runner.extra_args {
+            cmd.arg(extra);
+        }
+
+        cmd
     }
 }
 
@@ -131,9 +290,23 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Antigravity;
 
+/// Alias for [`Antigravity`] matching the unified `*Harness` naming convention.
+pub type AgyHarness = Antigravity;
+
 impl Harness for Antigravity {
     fn id(&self) -> &'static str {
         "agy"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Antigravity"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_HOOKS
+            | HarnessCapabilities::SESSION_RESUME
+            | HarnessCapabilities::HEADLESS_SPAWN
+            | HarnessCapabilities::NATIVE_MCP
     }
 
     fn sandbox_flag(&self) -> Option<&'static str> {
@@ -194,8 +367,57 @@ impl Harness for Antigravity {
         true
     }
 
-    fn supports_hooks(&self) -> bool {
-        true
+    #[cfg(feature = "sqlite")]
+    fn discover_sessions(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionMeta>, TkgError> {
+        let Some(home_path) = home_dir() else {
+            return Ok(Vec::new());
+        };
+        let db_path = home_path.join(".gemini/antigravity-cli/conversation_summaries.db");
+        let convs_dir = home_path.join(".gemini/antigravity-cli/conversations");
+        let history_path = home_path.join(".gemini/antigravity-cli/history.jsonl");
+        Ok(crate::sessions::query_session_from_sources(
+            &db_path,
+            &convs_dir,
+            &history_path,
+            agent_name,
+            workspace_root,
+        ))
+    }
+
+    #[cfg(not(feature = "sqlite"))]
+    fn discover_sessions(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionMeta>, TkgError> {
+        Ok(discover_generic_state_sessions(agent_name, workspace_root))
+    }
+
+    fn config_status(
+        &self,
+        _workspace_root: &Path,
+        runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = plugin_install_dir(runner)
+            .unwrap_or_else(|| PathBuf::from(".gemini/config/plugins/torqkage"));
+        let exists = p.exists();
+        let is_sym = p
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink());
+        (p, exists, is_sym)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::install_plugin_interactive(workspace_root, runner)
+            .map_err(TkgError::Workspace)
     }
 }
 
@@ -203,9 +425,22 @@ impl Harness for Antigravity {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OpenCode;
 
+/// Alias for [`OpenCode`] matching the unified `*Harness` naming convention.
+pub type OpenCodeHarness = OpenCode;
+
 impl Harness for OpenCode {
     fn id(&self) -> &'static str {
         "opencode"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "OpenCode"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::SESSION_RESUME
+            | HarnessCapabilities::HEADLESS_SPAWN
+            | HarnessCapabilities::NATIVE_MCP
     }
 
     fn resume_flag(&self) -> Option<&'static str> {
@@ -233,15 +468,55 @@ impl Harness for OpenCode {
             "/.local/share/opencode/plugins/".to_owned(),
         ]
     }
+
+    fn discover_sessions(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionMeta>, TkgError> {
+        Ok(discover_opencode_sessions(agent_name, workspace_root))
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = workspace_root.join("opencode.json");
+        let exists = p.is_file();
+        (p, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_opencode_config(workspace_root).map_err(TkgError::Workspace)
+    }
 }
 
 /// Claude Code.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ClaudeCode;
 
+/// Alias for [`ClaudeCode`] matching the unified `*Harness` naming convention.
+pub type ClaudeHarness = ClaudeCode;
+
 impl Harness for ClaudeCode {
     fn id(&self) -> &'static str {
         "claude"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Claude Code"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_HOOKS
+            | HarnessCapabilities::SESSION_RESUME
+            | HarnessCapabilities::HEADLESS_SPAWN
+            | HarnessCapabilities::NATIVE_MCP
     }
 
     fn workspace_dir(&self) -> Option<String> {
@@ -260,8 +535,93 @@ impl Harness for ClaudeCode {
         vec!["/.claude/plugins/".to_owned()]
     }
 
-    fn supports_hooks(&self) -> bool {
-        true
+    fn hook_dialect(&self) -> &'static dyn HookDialect {
+        &CLAUDE_CODE_DIALECT
+    }
+
+    fn discover_sessions(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionMeta>, TkgError> {
+        if let Some(home_path) = home_dir() {
+            let projects_dir = home_path.join(".claude").join("projects");
+            let sessions = discover_claude_sessions_in(&projects_dir, agent_name, workspace_root);
+            if !sessions.is_empty() {
+                return Ok(sessions);
+            }
+        }
+        Ok(discover_generic_state_sessions(agent_name, workspace_root))
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let mcp_path = workspace_root.join(".mcp.json");
+        let settings_path = workspace_root.join(".claude/settings.json");
+        let exists = mcp_path.is_file() && settings_path.is_file();
+        (mcp_path, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_claude_config(workspace_root).map_err(TkgError::Workspace)
+    }
+}
+
+/// Cursor IDE / CLI (MCP-native; uses in-band MCP circuit breaker seatbelt).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Cursor;
+
+/// Alias for [`Cursor`] matching the unified `*Harness` naming convention.
+pub type CursorHarness = Cursor;
+
+impl Harness for Cursor {
+    fn id(&self) -> &'static str {
+        "cursor"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Cursor"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn workspace_dir(&self) -> Option<String> {
+        Some(".cursor".to_owned())
+    }
+
+    fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
+        Some(home.join(".cursor/plugins"))
+    }
+
+    fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
+        vec![home.join(".cursor/agents")]
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = workspace_root.join(".cursor/mcp.json");
+        let exists = p.is_file();
+        (p, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_cursor_config(workspace_root).map_err(TkgError::Workspace)
     }
 }
 
@@ -302,6 +662,10 @@ impl Harness for Generic {
         &self.slug
     }
 
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::HEADLESS_SPAWN | HarnessCapabilities::NATIVE_MCP
+    }
+
     fn workspace_dir(&self) -> Option<String> {
         (!self.is_placeholder()).then(|| format!(".{}", self.slug))
     }
@@ -329,17 +693,13 @@ impl Harness for Generic {
 /// # Adding a New Harness
 /// 1. Implement [`Harness`] for the new harness struct in this module.
 /// 2. Add a match arm here and in [`builtin_harnesses`].
-/// 3. Implement `HarnessDriver` in `tkg-ctrl`
-///    (`crates/tkg-ctrl/src/installer.rs`) and `HookDialect` in `tkg-hooks`
-///    (`crates/tkg-hooks/src/stdin.rs`) if the harness uses custom config
-///    registration, session storage, or hook wire JSON.
-// TODO(harness): Add native implementations for Cursor, Windsurf, Aider, and Codex CLI.
 #[must_use]
 pub fn resolve(name: &str) -> Box<dyn Harness> {
     match name.trim().to_ascii_lowercase().as_str() {
         "agy" | "antigravity" => Box::new(Antigravity),
         "opencode" => Box::new(OpenCode),
         "claude" | "claude-code" => Box::new(ClaudeCode),
+        "cursor" => Box::new(Cursor),
         other => Box::new(Generic::new(other)),
     }
 }
@@ -356,7 +716,7 @@ pub fn resolve_client_name(raw_name: &str) -> Box<dyn Harness> {
     } else if lower.contains("opencode") {
         Box::new(OpenCode)
     } else if lower.contains("cursor") {
-        Box::new(Generic::new("cursor"))
+        Box::new(Cursor)
     } else if lower.contains("windsurf") {
         Box::new(Generic::new("windsurf"))
     } else {
@@ -402,6 +762,7 @@ pub fn builtin_harnesses() -> Vec<Box<dyn Harness>> {
         Box::new(Antigravity),
         Box::new(OpenCode),
         Box::new(ClaudeCode),
+        Box::new(Cursor),
     ]
 }
 
@@ -584,5 +945,44 @@ mod tests {
         let unknown = resolve_client_name("zed-editor");
         assert_eq!(unknown.id(), "zed-editor");
         assert!(!unknown.supports_hooks());
+    }
+
+    #[test]
+    fn test_unified_harness_capabilities_and_spawn_cmd() {
+        assert!(
+            ClaudeHarness::default()
+                .capabilities()
+                .contains(HarnessCapabilities::NATIVE_HOOKS | HarnessCapabilities::SESSION_RESUME)
+        );
+        assert!(
+            AgyHarness::default()
+                .capabilities()
+                .contains(HarnessCapabilities::NATIVE_HOOKS | HarnessCapabilities::HEADLESS_SPAWN)
+        );
+        assert_eq!(
+            CursorHarness::default().capabilities(),
+            HarnessCapabilities::NATIVE_MCP
+        );
+        assert!(
+            OpenCodeHarness::default()
+                .capabilities()
+                .contains(HarnessCapabilities::SESSION_RESUME)
+        );
+
+        let r = runner("opencode");
+        let cmd = r.harness().build_spawn_cmd(
+            Path::new("/ws"),
+            &r,
+            Some("coder"),
+            Some("fix bugs"),
+            Some("ses-99"),
+            false,
+            &BTreeMap::new(),
+        );
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, vec!["--session", "ses-99", "fix bugs"]);
     }
 }

@@ -143,45 +143,16 @@ pub(crate) fn build_harness_command(
     resume_conversation: Option<&str>,
 ) -> Command {
     let project_cfg = tkg_common::project::ProjectConfig::detect_or_load(workspace_root);
-    let binary = runner.resolved_binary();
-    let mut cmd = Command::new(&binary);
-
-    for (k, v) in project_cfg.resolved_environment(workspace_root) {
-        cmd.env(k, v);
-    }
-
-    if let Some(custom_cmd) = &runner.command
-        && let Some(sub_args) = custom_cmd.get(1..)
-    {
-        for arg in sub_args {
-            if arg == "{agent}" {
-                cmd.arg(agent_name);
-            } else if (arg == "{conversation}" || arg == "{session}")
-                && let Some(cid) = resume_conversation
-            {
-                cmd.arg(cid);
-            } else {
-                cmd.arg(arg);
-            }
-        }
-    } else {
-        if sandbox && let Some(flag) = runner.resolved_sandbox_flag() {
-            cmd.arg(flag);
-        }
-        if let Some(conv_id) = resume_conversation {
-            if let Some(flag) = runner.resolved_resume_flag() {
-                cmd.arg(flag).arg(conv_id);
-            }
-        } else if let Some(flag) = runner.resolved_agent_flag() {
-            cmd.arg(flag).arg(agent_name);
-        }
-    }
-
-    for extra in &runner.extra_args {
-        cmd.arg(extra);
-    }
-
-    cmd
+    let env_vars = project_cfg.resolved_environment(workspace_root);
+    runner.harness().build_spawn_cmd(
+        workspace_root,
+        runner,
+        Some(agent_name),
+        None,
+        resume_conversation,
+        sandbox,
+        &env_vars,
+    )
 }
 
 /// Resolves the target working directory for launching an agent session,

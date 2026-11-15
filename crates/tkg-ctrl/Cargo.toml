@@ -21,15 +21,12 @@ name = "tkg"
 path = "src/main.rs"
 
 [dependencies]
-tkg-common = { workspace = true }
+tkg-common = { workspace = true, features = ["sqlite"] }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
 which = { workspace = true }
-rusqlite = { workspace = true }
 
 [lints]
 workspace = true
