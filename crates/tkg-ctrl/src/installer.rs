@@ -1,6 +1,7 @@
 //! # installer
 //!
-//! In-deck plugin installation, directory copying, and host system prerequisite diagnostics.
+//! In-deck plugin installation, directory copying, and host system prerequisite
+//! diagnostics.
 
 use std::{
     fmt::Write,
@@ -88,9 +89,11 @@ pub(crate) fn is_binary_available(name: &str) -> bool {
     which::which(name).is_ok()
 }
 
-/// Behavioural contract for installing, registering, and checking configuration of an execution harness.
+/// Behavioural contract for installing, registering, and checking configuration
+/// of an execution harness.
 pub(crate) trait HarnessDriver: Send + Sync {
-    /// Returns `(config_or_bundle_path, is_installed, is_symlink)` for diagnostics.
+    /// Returns `(config_or_bundle_path, is_installed, is_symlink)` for
+    /// diagnostics.
     fn config_status(
         &self,
         workspace_root: &Path,
@@ -175,9 +178,10 @@ impl HarnessDriver for ClaudeDriver {
         workspace_root: &Path,
         _runner: &tkg_common::ProjectRunnerConfig,
     ) -> (PathBuf, bool, bool) {
-        let p = workspace_root.join(".mcp.json");
-        let exists = p.is_file();
-        (p, exists, false)
+        let mcp_path = workspace_root.join(".mcp.json");
+        let settings_path = workspace_root.join(".claude/settings.json");
+        let exists = mcp_path.is_file() && settings_path.is_file();
+        (mcp_path, exists, false)
     }
 
     fn register_config(
@@ -189,7 +193,8 @@ impl HarnessDriver for ClaudeDriver {
     }
 
     fn session_provider(&self) -> Box<dyn crate::session::SessionProvider> {
-        // TODO(harness): Implement native ClaudeSessionProvider reading ~/.claude/projects/ JSONL transcripts.
+        // TODO(harness): Implement native ClaudeSessionProvider reading
+        // ~/.claude/projects/ JSONL transcripts.
         Box::new(crate::session::GenericSessionProvider)
     }
 }
@@ -233,7 +238,8 @@ pub(crate) fn driver_for(runner: &tkg_common::ProjectRunnerConfig) -> Box<dyn Ha
 }
 
 /// Runs a diagnostic scan of the host environment, plugin install path,
-/// and dynamically validates all binaries declared across tools.toml and project.toml.
+/// and dynamically validates all binaries declared across tools.toml and
+/// project.toml.
 #[must_use]
 pub(crate) fn run_diagnostics(workspace_root: &Path) -> DiagnosticsReport {
     let project_cfg = tkg_common::project::ProjectConfig::detect_or_load(workspace_root);
@@ -357,8 +363,9 @@ fn ensure_binaries_executable(dest_bin: &Path) {
     }
 }
 
-/// Discovers the local plugin source bundle either in `<workspace>/plugins/torqkage`
-/// or directly in `<workspace>` if executed inside an extracted plugin release bundle.
+/// Discovers the local plugin source bundle either in
+/// `<workspace>/plugins/torqkage` or directly in `<workspace>` if executed
+/// inside an extracted plugin release bundle.
 fn resolve_source_plugin(workspace_root: &Path) -> Result<PathBuf, String> {
     if workspace_root
         .join("plugins/torqkage/plugin.json")
@@ -378,12 +385,13 @@ fn resolve_source_plugin(workspace_root: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// Installs the plugin bundle by copying all declarative files, agents, and binaries
-/// into the user-global plugin directory of the configured harness
+/// Installs the plugin bundle by copying all declarative files, agents, and
+/// binaries into the user-global plugin directory of the configured harness
 /// (see [`tkg_common::harness::plugin_install_dir`]).
 ///
 /// # Errors
-/// Returns an error string if source resolution, directory creation, or file copying fails.
+/// Returns an error string if source resolution, directory creation, or file
+/// copying fails.
 pub(crate) fn install_plugin_interactive(
     workspace_root: &Path,
     runner: &tkg_common::ProjectRunnerConfig,
@@ -425,7 +433,8 @@ pub(crate) fn install_plugin_interactive(
         )
     })?;
 
-    // Stage fresh compiled binaries if they exist in workspace target directories
+    // Stage fresh compiled binaries if they exist in workspace target
+    // directories
     let dest_bin = dest.join("bin");
     drop(std::fs::create_dir_all(&dest_bin));
     for profile in ["release", "fast", "debug"] {
@@ -465,7 +474,8 @@ pub(crate) fn install_plugin_interactive(
     ))
 }
 
-/// Registers or installs the `TorqKage` configuration for the selected execution harness.
+/// Registers or installs the `TorqKage` configuration for the selected
+/// execution harness.
 pub(crate) fn register_harness_config(
     workspace_root: &Path,
     runner: &tkg_common::ProjectRunnerConfig,
@@ -473,23 +483,43 @@ pub(crate) fn register_harness_config(
     driver_for(runner).register_config(workspace_root, runner)
 }
 
-/// Registers `tkg-mcp` in `opencode.json` for `OpenCode` integration.
-pub(crate) fn register_opencode_config(workspace_root: &Path) -> Result<String, String> {
-    let config_path = workspace_root.join("opencode.json");
-    let mut config: serde_json::Value = if config_path.is_file() {
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({
-            "$schema": "https://opencode.ai/schema.json"
-        })
-    };
-
-    if !config.is_object() {
-        config = serde_json::json!({});
+/// Reads an existing JSON file as a JSON object, or initializes a new object
+/// from `default_json` if the file does not exist or is empty. Fails closed if
+/// an existing file has invalid JSON.
+fn read_or_init_json_object(
+    config_path: &Path,
+    default_json: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if !config_path.is_file() {
+        return Ok(default_json);
     }
+    let content = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
+    if content.trim().is_empty() {
+        return Ok(default_json);
+    }
+    let parsed: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse JSON in {}: {e}", config_path.display()))?;
+    if !parsed.is_object() {
+        return Err(format!(
+            "Expected a top-level JSON object in {}",
+            config_path.display()
+        ));
+    }
+    Ok(parsed)
+}
 
+/// Serializes `value` as pretty JSON and writes it atomically to `config_path`.
+fn write_pretty_json_atomic(config_path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    let serialized = serde_json::to_string_pretty(value)
+        .map_err(|e| format!("Failed to serialize {}: {e}", config_path.display()))?;
+    tkg_common::atomic_write(config_path, serialized.as_bytes())
+        .map_err(|e| format!("Failed to write {}: {e}", config_path.display()))
+}
+
+/// Inserts or updates the `torqkage` server entry under `mcpServers` without
+/// disturbing other keys.
+fn upsert_torqkage_mcp_server(config: &mut serde_json::Value) {
     if let Some(obj) = config.as_object_mut() {
         let servers = obj
             .entry("mcpServers")
@@ -504,11 +534,17 @@ pub(crate) fn register_opencode_config(workspace_root: &Path) -> Result<String, 
             );
         }
     }
+}
 
-    let serialized = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize opencode.json: {e}"))?;
-    std::fs::write(&config_path, serialized)
-        .map_err(|e| format!("Failed to write {}: {e}", config_path.display()))?;
+/// Registers `tkg-mcp` in `opencode.json` for `OpenCode` integration.
+pub(crate) fn register_opencode_config(workspace_root: &Path) -> Result<String, String> {
+    let config_path = workspace_root.join("opencode.json");
+    let mut config = read_or_init_json_object(
+        &config_path,
+        serde_json::json!({ "$schema": "https://opencode.ai/schema.json" }),
+    )?;
+    upsert_torqkage_mcp_server(&mut config);
+    write_pretty_json_atomic(&config_path, &config)?;
 
     Ok(format!(
         "✔ Registered 'tkg-mcp' in opencode.json at {}",
@@ -516,44 +552,81 @@ pub(crate) fn register_opencode_config(workspace_root: &Path) -> Result<String, 
     ))
 }
 
-/// Registers `tkg-mcp` in `.mcp.json` for Claude Code integration.
-pub(crate) fn register_claude_config(workspace_root: &Path) -> Result<String, String> {
-    let config_path = workspace_root.join(".mcp.json");
-    let mut config: serde_json::Value = if config_path.is_file() {
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
+/// Upserts a Claude Code hook entry under `.claude/settings.json`'s
+/// `hooks.<event>` array while preserving existing unrelated matchers and
+/// commands.
+fn upsert_claude_hook_event(
+    hooks_obj: &mut serde_json::Map<String, serde_json::Value>,
+    event: &str,
+    matcher: Option<&str>,
+    subcommand: &str,
+    timeout_secs: u64,
+) {
+    let entry_list = hooks_obj
+        .entry(event)
+        .or_insert_with(|| serde_json::json!([]));
+    let Some(arr) = entry_list.as_array_mut() else {
+        return;
     };
 
-    if !config.is_object() {
-        config = serde_json::json!({});
-    }
+    // Strip any previously installed TorqKage hook entries for this subcommand
+    // to stay idempotent
+    arr.retain(|item| {
+        let has_tkg_cmd = item
+            .get("hooks")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|hs| {
+                hs.iter().any(|h| {
+                    h.get("command")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|cmd| cmd.contains(&format!("tkg-hooks {subcommand}")))
+                })
+            });
+        !has_tkg_cmd
+    });
 
-    if let Some(obj) = config.as_object_mut() {
-        let servers = obj
-            .entry("mcpServers")
+    let cmd_entry = serde_json::json!({
+        "type": "command",
+        "command": format!("tkg-hooks {subcommand}"),
+        "timeout": timeout_secs
+    });
+    let wrapper = matcher.map_or_else(
+        || serde_json::json!({ "hooks": [cmd_entry] }),
+        |m| serde_json::json!({ "matcher": m, "hooks": [cmd_entry] }),
+    );
+    arr.push(wrapper);
+}
+
+/// Registers `tkg-mcp` in `.mcp.json` and `tkg-hooks` in
+/// `.claude/settings.json` for Claude Code, preserving existing user settings
+/// and unrelated hooks/servers.
+pub(crate) fn register_claude_config(workspace_root: &Path) -> Result<String, String> {
+    let mcp_path = workspace_root.join(".mcp.json");
+    let mut mcp_config = read_or_init_json_object(&mcp_path, serde_json::json!({}))?;
+    upsert_torqkage_mcp_server(&mut mcp_config);
+    write_pretty_json_atomic(&mcp_path, &mcp_config)?;
+
+    let claude_dir = workspace_root.join(".claude");
+    std::fs::create_dir_all(&claude_dir)
+        .map_err(|e| format!("Failed to create {}: {e}", claude_dir.display()))?;
+    let settings_path = claude_dir.join("settings.json");
+    let mut settings = read_or_init_json_object(&settings_path, serde_json::json!({}))?;
+    if let Some(root_obj) = settings.as_object_mut() {
+        let hooks = root_obj
+            .entry("hooks")
             .or_insert_with(|| serde_json::json!({}));
-        if let Some(s_obj) = servers.as_object_mut() {
-            s_obj.insert(
-                "torqkage".to_owned(),
-                serde_json::json!({
-                    "command": "tkg-mcp",
-                    "args": []
-                }),
-            );
+        if let Some(hooks_obj) = hooks.as_object_mut() {
+            upsert_claude_hook_event(hooks_obj, "PreToolUse", Some("*"), "pre-tool-use", 15);
+            upsert_claude_hook_event(hooks_obj, "SessionStart", None, "inject-wake", 5);
+            upsert_claude_hook_event(hooks_obj, "Stop", None, "record-handoff", 10);
         }
     }
-
-    let serialized = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize .mcp.json: {e}"))?;
-    std::fs::write(&config_path, serialized)
-        .map_err(|e| format!("Failed to write {}: {e}", config_path.display()))?;
+    write_pretty_json_atomic(&settings_path, &settings)?;
 
     Ok(format!(
-        "✔ Registered 'tkg-mcp' in .mcp.json at {}",
-        config_path.display()
+        "✔ Registered 'tkg-mcp' in {} and hooks in {}",
+        mcp_path.display(),
+        settings_path.display()
     ))
 }
 
@@ -563,18 +636,9 @@ pub(crate) fn register_custom_mcp_config(workspace_root: &Path) -> Result<String
     std::fs::create_dir_all(&state_dir)
         .map_err(|e| format!("Failed to create {}: {e}", state_dir.display()))?;
     let config_path = state_dir.join("mcp_servers.json");
-    let config = serde_json::json!({
-        "mcpServers": {
-            "torqkage": {
-                "command": "tkg-mcp",
-                "args": []
-            }
-        }
-    });
-    let serialized = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize mcp_servers.json: {e}"))?;
-    std::fs::write(&config_path, serialized)
-        .map_err(|e| format!("Failed to write {}: {e}", config_path.display()))?;
+    let mut config = serde_json::json!({});
+    upsert_torqkage_mcp_server(&mut config);
+    write_pretty_json_atomic(&config_path, &config)?;
 
     Ok(format!(
         "✔ Generated MCP server config at {}",
@@ -657,7 +721,7 @@ mod tests {
             Some("tkg-mcp")
         );
 
-        // 2. Claude
+        // 2. Claude (.mcp.json + .claude/settings.json)
         let claude_res = register_claude_config(&temp_ws);
         claude_res.unwrap();
         let cl_file = temp_ws.join(".mcp.json");
@@ -669,6 +733,28 @@ mod tests {
                 .pointer("/mcpServers/torqkage/command")
                 .and_then(serde_json::Value::as_str),
             Some("tkg-mcp")
+        );
+        let settings_file = temp_ws.join(".claude/settings.json");
+        assert!(settings_file.is_file());
+        let settings_content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings_file).unwrap()).unwrap();
+        assert_eq!(
+            settings_content
+                .pointer("/hooks/PreToolUse/0/hooks/0/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-hooks pre-tool-use")
+        );
+        assert_eq!(
+            settings_content
+                .pointer("/hooks/SessionStart/0/hooks/0/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-hooks inject-wake")
+        );
+        assert_eq!(
+            settings_content
+                .pointer("/hooks/Stop/0/hooks/0/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-hooks record-handoff")
         );
 
         // 3. Custom MCP
@@ -684,6 +770,78 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("tkg-mcp")
         );
+
+        drop(std::fs::remove_dir_all(&temp_ws));
+    }
+
+    #[test]
+    fn test_register_claude_preserves_existing_keys_and_is_idempotent() {
+        let temp_ws =
+            std::env::temp_dir().join(format!("tkg_claude_merge_test_{}", std::process::id()));
+        drop(std::fs::remove_dir_all(&temp_ws));
+        std::fs::create_dir_all(temp_ws.join(".claude")).unwrap();
+
+        std::fs::write(
+            temp_ws.join(".mcp.json"),
+            r#"{"mcpServers":{"other":{"command":"other-mcp"}},"extraFlag":true}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp_ws.join(".claude/settings.json"),
+            r#"{"permissions":{"allow":["Read"]},"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"my-audit"}]}]}}"#,
+        )
+        .unwrap();
+
+        register_claude_config(&temp_ws).unwrap();
+        // Run twice to ensure idempotency (no duplicate tkg-hooks entries)
+        register_claude_config(&temp_ws).unwrap();
+
+        let mcp_json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(temp_ws.join(".mcp.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            mcp_json
+                .pointer("/mcpServers/other/command")
+                .and_then(serde_json::Value::as_str),
+            Some("other-mcp")
+        );
+        assert_eq!(
+            mcp_json
+                .pointer("/mcpServers/torqkage/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-mcp")
+        );
+        assert_eq!(
+            mcp_json
+                .get("extraFlag")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+
+        let settings: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(temp_ws.join(".claude/settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            settings
+                .pointer("/permissions/allow/0")
+                .and_then(serde_json::Value::as_str),
+            Some("Read")
+        );
+        let pre_tool = settings
+            .pointer("/hooks/PreToolUse")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+        assert_eq!(
+            pre_tool.len(),
+            2,
+            "must retain user hook + exactly one tkg-hooks entry: {pre_tool:?}"
+        );
+
+        // Corrupt JSON must fail closed rather than clobbering user config
+        std::fs::write(temp_ws.join(".mcp.json"), "{ invalid json").unwrap();
+        let err = register_claude_config(&temp_ws).unwrap_err();
+        assert!(err.contains("Failed to parse JSON"));
 
         drop(std::fs::remove_dir_all(&temp_ws));
     }
