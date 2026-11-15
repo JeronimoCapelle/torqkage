@@ -31,9 +31,11 @@ body = """
 {% if version %}
     ### Installation
 
-    ```bash
-    # Precompiled Linux binaries (x86_64 gnu/musl, aarch64 gnu)
-    curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/{{ version }}/install.sh | bash
+    ```sh
+    # Precompiled Linux (x86_64/aarch64 gnu/musl) & macOS (Apple Silicon / Intel) binaries
+    curl -sSL https://raw.githubusercontent.com/JeronimoCapelle/torqkage/{{ version }}/install.sh | sh
+
+    # Windows: download torqkage-x86_64-pc-windows-msvc.zip from release assets
 
     # Via Cargo (crates.io)
     cargo install torqkage tkg-mcp tkg-hooks

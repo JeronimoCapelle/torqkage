@@ -377,11 +377,12 @@ try_precompiled_install() {
         base_url="https://github.com/${GITHUB_REPO}/releases/download/${RELEASE_TAG}"
     fi
     download_url="${base_url}/torqkage-${target}.tar.gz"
-    checksum_url="${download_url}.sha256"
+    checksum_url="${base_url}/torqkage-${target}.sha256"
+    legacy_checksum_url="${download_url}.sha256"
 
     TMP_CLEANUP_DIR=$(mktemp -d)
     tar_path="${TMP_CLEANUP_DIR}/torqkage.tar.gz"
-    sha_path="${TMP_CLEANUP_DIR}/torqkage.tar.gz.sha256"
+    sha_path="${TMP_CLEANUP_DIR}/torqkage-${target}.sha256"
 
     echo "--> Downloading ${download_url}..."
     if ! fetch_url "${download_url}" "${tar_path}"; then
@@ -389,7 +390,7 @@ try_precompiled_install() {
         return 1
     fi
 
-    if fetch_url "${checksum_url}" "${sha_path}"; then
+    if fetch_url "${checksum_url}" "${sha_path}" || fetch_url "${legacy_checksum_url}" "${sha_path}"; then
         verify_sha256 "${tar_path}" "${sha_path}" || return 1
     fi
 

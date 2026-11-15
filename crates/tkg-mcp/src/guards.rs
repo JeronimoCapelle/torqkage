@@ -51,55 +51,52 @@ pub(crate) fn resolve_safe_path(
         }
     }
 
-    let candidate = if input_path.is_absolute() {
+    let candidate = if input_path.has_root() {
         input_path.to_path_buf()
     } else {
         workspace_root.join(input_path)
     };
 
     if enforce_bounds {
-        // If file exists, check canonical root prefix
-        if candidate.exists() {
-            let canonical = candidate.canonicalize().map_err(|err| {
+        let canonical_root = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf());
+
+        let resolved = if candidate.exists() {
+            Some(candidate.canonicalize().map_err(|err| {
                 format!(
                     "Failed to canonicalize path '{}': {err}",
                     candidate.display()
                 )
-            })?;
-
-            let canonical_root = workspace_root
-                .canonicalize()
-                .unwrap_or_else(|_| workspace_root.to_path_buf());
-
-            if !canonical.starts_with(&canonical_root) {
-                return Err(format!(
-                    "Security policy violation: Path '{}' escapes canonical workspace root '{}'",
-                    canonical.display(),
-                    canonical_root.display()
-                ));
-            }
+            })?)
         } else {
-            // For not-yet-existing files, verify parent
-            if let Some(parent) = candidate.parent()
-                && parent.exists()
-            {
-                let canonical_parent = parent.canonicalize().map_err(|err| {
-                    format!(
-                        "Failed to canonicalize parent '{}': {err}",
-                        parent.display()
-                    )
-                })?;
-                let canonical_root = workspace_root
-                    .canonicalize()
-                    .unwrap_or_else(|_| workspace_root.to_path_buf());
+            // Walk up to the nearest existing ancestor so non-existent nested
+            // workspace paths resolve inside root while rooted or non-existent
+            // escaping paths fail closed across Unix and Windows.
+            candidate
+                .ancestors()
+                .find(|ancestor| ancestor.exists())
+                .map(|ancestor| {
+                    ancestor.canonicalize().map_err(|err| {
+                        format!(
+                            "Failed to canonicalize ancestor '{}': {err}",
+                            ancestor.display()
+                        )
+                    })
+                })
+                .transpose()?
+        };
 
-                if !canonical_parent.starts_with(&canonical_root) {
-                    return Err(
-                        "Security policy violation: Path parent escapes workspace bounds"
-                            .to_owned(),
-                    );
-                }
-            }
+        if !resolved
+            .as_ref()
+            .is_some_and(|path| path.starts_with(&canonical_root))
+        {
+            let escaped_display = resolved.as_ref().unwrap_or(&candidate);
+            return Err(format!(
+                "Security policy violation: Path '{}' escapes canonical workspace root '{}'",
+                escaped_display.display(),
+                canonical_root.display()
+            ));
         }
     }
 
@@ -674,9 +671,20 @@ mod tests {
 
     #[test]
     fn test_path_traversal_rejected() {
-        let root = std::env::temp_dir();
+        let root = std::env::temp_dir().join(format!(
+            "tkg_traversal_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        _ = std::fs::create_dir_all(&root);
         assert!(resolve_safe_path(&root, "../etc/passwd", &[], true).is_err());
         assert!(resolve_safe_path(&root, "foo/../../etc", &[], true).is_err());
+        assert!(resolve_safe_path(&root, "/etc/passwd", &[], true).is_err());
+        assert!(resolve_safe_path(&root, "/nonexistent/outside/path", &[], true).is_err());
+        assert!(resolve_safe_path(&root, "nested_new_dir/file.rs", &[], true).is_ok());
+        _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

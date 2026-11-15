@@ -14,6 +14,13 @@ use crate::{
 
 const MAX_SEARCH_MATCHES: usize = 500;
 
+fn format_rel_display(path: &Path, workspace_root: &Path) -> String {
+    path.strip_prefix(workspace_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn build_search_matcher(
     pattern: &str,
     is_regex_opt: Option<bool>,
@@ -100,11 +107,7 @@ pub(crate) fn execute(
             continue;
         }
 
-        let rel_display = target
-            .strip_prefix(workspace_root)
-            .unwrap_or(target)
-            .display()
-            .to_string();
+        let rel_display = format_rel_display(target, workspace_root);
         searched_targets.push(rel_display);
 
         if target.is_dir() {
@@ -134,15 +137,9 @@ pub(crate) fn execute(
                 project.docs.display_summary()
             ));
         }
-        let fallback_display = targets.first().map_or_else(
-            || ".".to_owned(),
-            |p| {
-                p.strip_prefix(workspace_root)
-                    .unwrap_or(p)
-                    .display()
-                    .to_string()
-            },
-        );
+        let fallback_display = targets
+            .first()
+            .map_or_else(|| ".".to_owned(), |p| format_rel_display(p, workspace_root));
         return Ok(format!(
             "Search target directory '{fallback_display}' does not exist in repository."
         ));
@@ -229,11 +226,7 @@ fn search_single_file(
         return;
     }
 
-    let rel_path = file_path
-        .strip_prefix(workspace_root)
-        .unwrap_or(file_path)
-        .display()
-        .to_string();
+    let rel_path = format_rel_display(file_path, workspace_root);
 
     let mut searcher = SearcherBuilder::new()
         .binary_detection(BinaryDetection::quit(b'\x00'))
