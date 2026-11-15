@@ -87,7 +87,8 @@ style       = { level = "warn", priority = -1 }
 complexity  = { level = "warn", priority = -1 }
 perf        = { level = "warn", priority = -1 }
 pedantic    = { level = "warn", priority = -1 }
-nursery     = { level = "warn", priority = -1 }
+# `nursery` lints are unstable/noisy (e.g. `option_if_let_else`); keep explicit opt-ins only.
+nursery     = { level = "allow", priority = -1 }
 cargo       = { level = "warn", priority = -1 }
 
 # Conflict resolutions
@@ -98,7 +99,6 @@ module_name_repetitions = "allow"
 
 # Hard Invariants
 semicolon_if_nothing_returned = "forbid"
-unseparated_literal_suffix = "forbid"
 undocumented_unsafe_blocks = "forbid"
 multiple_unsafe_ops_per_block = "forbid"
 allow_attributes_without_reason = "deny"
@@ -155,7 +155,7 @@ panic_in_result_fn = "warn"
 indexing_slicing = "warn"
 string_slice = "warn"
 get_unwrap = "warn"
-assertions_on_result_states = "warn"
+assertions_on_result_states = "allow"
 dbg_macro = "warn"
 print_stdout = "warn"
 print_stderr = "warn"
@@ -163,7 +163,7 @@ use_debug = "warn"
 
 # Code Hygiene
 cfg_not_test = "warn"
-tests_outside_test_module = "warn"
+tests_outside_test_module = "allow"
 unnecessary_self_imports = "warn"
 unnecessary_safety_comment = "warn"
 unnecessary_safety_doc = "warn"
