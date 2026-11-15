@@ -24,7 +24,7 @@ globset = { workspace = true }
 tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["signal", "process"] }
+nix = { workspace = true, features = ["signal", "process", "poll", "fs"] }
 
 [dev-dependencies]
 divan = { workspace = true }

@@ -118,6 +118,13 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
     fn uses_agy_frontmatter(&self) -> bool {
         false
     }
+
+    /// Whether this harness provides native lifecycle hook interception
+    /// (`PreToolUse`, `Stop`, `SessionStart`). Harnesses returning `false` rely
+    /// on `TorqKage`'s universal in-band MCP seatbelt.
+    fn supports_hooks(&self) -> bool {
+        false
+    }
 }
 
 /// Google Antigravity (`agy`).
@@ -186,6 +193,10 @@ impl Harness for Antigravity {
     fn uses_agy_frontmatter(&self) -> bool {
         true
     }
+
+    fn supports_hooks(&self) -> bool {
+        true
+    }
 }
 
 /// `OpenCode`.
@@ -247,6 +258,10 @@ impl Harness for ClaudeCode {
 
     fn plugin_path_markers(&self) -> Vec<String> {
         vec!["/.claude/plugins/".to_owned()]
+    }
+
+    fn supports_hooks(&self) -> bool {
+        true
     }
 }
 
@@ -327,6 +342,56 @@ pub fn resolve(name: &str) -> Box<dyn Harness> {
         "claude" | "claude-code" => Box::new(ClaudeCode),
         other => Box::new(Generic::new(other)),
     }
+}
+
+/// Normalizes a free-form MCP `clientInfo.name` or process cmdline token into
+/// the matching [`Harness`] implementation.
+#[must_use]
+pub fn resolve_client_name(raw_name: &str) -> Box<dyn Harness> {
+    let lower = raw_name.trim().to_ascii_lowercase();
+    if lower.contains("claude") {
+        Box::new(ClaudeCode)
+    } else if lower.contains("antigravity") || lower == "agy" || lower.starts_with("agy-") {
+        Box::new(Antigravity)
+    } else if lower.contains("opencode") {
+        Box::new(OpenCode)
+    } else if lower.contains("cursor") {
+        Box::new(Generic::new("cursor"))
+    } else if lower.contains("windsurf") {
+        Box::new(Generic::new("windsurf"))
+    } else {
+        resolve(raw_name)
+    }
+}
+
+/// Best-effort detection of the parent host harness via `/proc/<ppid>/cmdline`
+/// on Linux.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn detect_parent_process_harness() -> Option<String> {
+    let ppid = std::os::unix::process::parent_id();
+    let bytes = std::fs::read(format!("/proc/{ppid}/cmdline")).ok()?;
+    let cmdline = String::from_utf8_lossy(&bytes).to_ascii_lowercase();
+    for needle in [
+        "claude",
+        "cursor",
+        "opencode",
+        "windsurf",
+        "antigravity",
+        "agy",
+    ] {
+        if cmdline.contains(needle) {
+            return Some(resolve_client_name(needle).id().to_owned());
+        }
+    }
+    None
+}
+
+/// Non-Linux stub returning `None`.
+#[cfg(not(target_os = "linux"))]
+#[must_use]
+pub fn detect_parent_process_harness() -> Option<String> {
+    None
 }
 
 /// All built-in harnesses (used for cross-harness fallbacks and marker
@@ -500,5 +565,24 @@ mod tests {
         assert_eq!(detect_workspace_harness(&empty_ws), None);
 
         _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn test_resolve_client_name_and_hook_support() {
+        let cursor = resolve_client_name("Cursor");
+        assert_eq!(cursor.id(), "cursor");
+        assert!(!cursor.supports_hooks());
+
+        let claude = resolve_client_name("Claude Code");
+        assert_eq!(claude.id(), "claude");
+        assert!(claude.supports_hooks());
+
+        let agy = resolve_client_name("antigravity-cli");
+        assert_eq!(agy.id(), "agy");
+        assert!(agy.supports_hooks());
+
+        let unknown = resolve_client_name("zed-editor");
+        assert_eq!(unknown.id(), "zed-editor");
+        assert!(!unknown.supports_hooks());
     }
 }

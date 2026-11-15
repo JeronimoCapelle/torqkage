@@ -1,7 +1,11 @@
 //! The Model Context Protocol (MCP) server daemon handling JSON-RPC 2.0
 //! requests over stdio.
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -22,6 +26,7 @@ pub(crate) struct McpServer {
     workspace_root: PathBuf,
     agent: Option<String>,
     agent_guards: BTreeMap<String, AgentGuard>,
+    detected_harness: Arc<RwLock<Option<String>>>,
 }
 
 impl McpServer {
@@ -68,13 +73,29 @@ impl McpServer {
             .map(McpTool::from_definition)
             .collect();
 
+        let initial_harness = std::env::var("TKG_HARNESS")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| tkg_common::harness::resolve(&v).id().to_owned())
+            .or_else(tkg_common::harness::detect_parent_process_harness);
+
         Self {
             tools: enriched_tools,
             mcp_tools,
             workspace_root,
             agent,
             agent_guards,
+            detected_harness: Arc::new(RwLock::new(initial_harness)),
         }
+    }
+
+    fn caller_harness(&self) -> Box<dyn tkg_common::harness::Harness> {
+        if let Ok(guard) = self.detected_harness.read()
+            && let Some(ref id) = *guard
+        {
+            return tkg_common::harness::resolve(id);
+        }
+        tkg_common::harness::runner_for(&self.workspace_root).harness()
     }
 
     /// Handles a single incoming JSON-RPC request and produces a response (if
@@ -88,6 +109,25 @@ impl McpServer {
 
         match req.method.as_str() {
             "initialize" => {
+                if let Some(client_name) = req
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("clientInfo"))
+                    .and_then(|ci| ci.get("name"))
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    let resolved = tkg_common::harness::resolve_client_name(client_name);
+                    let id = resolved.id().to_owned();
+                    eprintln!(
+                        "[tkg-mcp] Identified MCP caller harness '{id}' (from clientInfo.name='{client_name}', native_hooks={})",
+                        resolved.supports_hooks()
+                    );
+                    if let Ok(mut guard) = self.detected_harness.write() {
+                        *guard = Some(id);
+                    }
+                }
+
                 let result = json!({
                     "protocolVersion": "2024-11-05",
                     "capabilities": {
@@ -161,6 +201,7 @@ impl McpServer {
                     .and_then(|p| p.get("arguments"))
                     .unwrap_or(&empty_args);
 
+                let in_band_seatbelt = !self.caller_harness().supports_hooks();
                 let (content_text, is_error) = match actions::dispatch_action(
                     tool,
                     &self.workspace_root,
@@ -168,6 +209,7 @@ impl McpServer {
                     self.agent.as_deref(),
                     &self.agent_guards,
                     &self.tools,
+                    in_band_seatbelt,
                 ) {
                     Ok((text, err)) => (text, err),
                     Err(err_msg) => (err_msg, true),
@@ -291,9 +333,13 @@ impl McpServer {
             .clone()
             .or_else(|| tkg_common::resolve_active_agent(&self.workspace_root));
 
+        let caller = self.caller_harness();
+
         json!({
             "workspace_root": self.workspace_root,
             "active_agent": active_agent,
+            "detected_harness": caller.id(),
+            "in_band_seatbelt": !caller.supports_hooks(),
             "exposed_tools_count": self.tools.len(),
             "inside_container": tkg_common::is_inside_container(),
             "bwrap_available": which::which("bwrap").is_ok(),
@@ -844,5 +890,112 @@ mod tests {
             .unwrap()
             .to_owned();
         assert!(msg_text.contains("crates/tkg-mcp/src/server.rs"));
+    }
+
+    #[test]
+    fn test_initialize_client_info_updates_status_seatbelt() {
+        let server = sample_server();
+        let init_req = JsonRpcRequest {
+            jsonrpc: "2.0".to_owned(),
+            id: Some(json!(30)),
+            method: "initialize".to_owned(),
+            params: Some(json!({
+                "clientInfo": { "name": "Cursor", "version": "0.48.0" }
+            })),
+        };
+        let init_resp = server.handle_request(init_req).expect("init response");
+        assert!(init_resp.error.is_none());
+
+        let status_req = JsonRpcRequest {
+            jsonrpc: "2.0".to_owned(),
+            id: Some(json!(31)),
+            method: "resources/read".to_owned(),
+            params: Some(json!({ "uri": "tkg://status" })),
+        };
+        let status_resp = server.handle_request(status_req).expect("status response");
+        let status_text = status_resp.result.unwrap()["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let status_json: serde_json::Value = serde_json::from_str(&status_text).unwrap();
+        assert_eq!(status_json["detected_harness"], "cursor");
+        assert_eq!(status_json["in_band_seatbelt"], true);
+    }
+
+    #[test]
+    fn test_in_band_circuit_breaker_halts_mutating_calls() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tkg_inband_cb_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let tools = vec![
+            ToolDefinition {
+                name: "failing_check".to_owned(),
+                description: "Simulated failing check".to_owned(),
+                action: ToolAction::StaticCommand,
+                command: vec![
+                    "sh".to_owned(),
+                    "-c".to_owned(),
+                    "echo 'error[E0308]: mismatched types' >&2; exit 1".to_owned(),
+                ],
+                ..Default::default()
+            },
+            ToolDefinition {
+                name: "write_project_file".to_owned(),
+                description: "Write project file".to_owned(),
+                action: ToolAction::FileWrite,
+                safety: tkg_common::tools::ToolSafetyPolicy {
+                    mutating: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ];
+
+        let server = McpServer::new(tools, temp_dir.clone(), None, BTreeMap::new());
+        let init_resp = server
+            .handle_request(JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(json!(1)),
+                method: "initialize".to_owned(),
+                params: Some(json!({ "clientInfo": { "name": "cursor" } })),
+            })
+            .expect("init response");
+        assert!(init_resp.error.is_none());
+
+        for call_id in [2, 3] {
+            let resp = server
+                .handle_request(JsonRpcRequest {
+                    jsonrpc: "2.0".to_owned(),
+                    id: Some(json!(call_id)),
+                    method: "tools/call".to_owned(),
+                    params: Some(json!({ "name": "failing_check", "arguments": {} })),
+                })
+                .expect("failing_check response");
+            assert_eq!(resp.result.unwrap()["isError"], true);
+        }
+
+        let blocked_resp = server
+            .handle_request(JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(json!(4)),
+                method: "tools/call".to_owned(),
+                params: Some(json!({
+                    "name": "write_project_file",
+                    "arguments": { "path": "foo.txt", "content": "bar" }
+                })),
+            })
+            .expect("blocked response");
+        let result = blocked_resp.result.unwrap();
+        assert_eq!(result["isError"], true);
+        let msg = result["content"][0]["text"].as_str().unwrap();
+        assert!(msg.contains("CIRCUIT BREAKER TRIPPED"));
+
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

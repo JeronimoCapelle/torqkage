@@ -651,7 +651,7 @@ pub fn extract_compiler_error_signature(
     if let Some(prefix) = custom_prefix {
         for line in output.lines() {
             if let Some(idx) = line.find(prefix) {
-                let start = idx.saturating_add(prefix.len());
+                let start = idx + prefix.len();
                 let rest = line.get(start..).unwrap_or("");
                 let token = rest
                     .split_whitespace()
@@ -672,7 +672,17 @@ pub fn extract_compiler_error_signature(
     for line in output.lines() {
         let trimmed = line.trim();
         let lower = trimmed.to_ascii_lowercase();
-        if lower.starts_with("error") || lower.starts_with("fail") {
+        if lower.starts_with("error")
+            || lower.starts_with("fail")
+            || lower.contains("test result: failed")
+            || (lower.contains("failed") && lower.contains("test"))
+            || trimmed.contains("SyntaxError:")
+            || trimmed.starts_with("Traceback")
+            || lower.contains("build failed")
+            || trimmed.contains("FAIL:")
+            || trimmed.starts_with("--- FAIL:")
+            || trimmed.starts_with("FAIL\t")
+        {
             let token: String = trimmed.chars().take(80).collect();
             return Some(token);
         }
@@ -687,7 +697,7 @@ pub fn extract_compiler_error_signature(
 pub fn extract_bracketed_error_code(output: &str) -> Option<String> {
     for line in output.lines() {
         if let Some(idx) = line.find("error[") {
-            let start = idx.saturating_add(6);
+            let start = idx + 6;
             if let Some(rest) = line.get(start..)
                 && let Some(end) = rest.find(']')
             {
@@ -911,5 +921,16 @@ mod tests {
             extract_compiler_error_signature(vitest_output, None),
             Some("FAIL  src/tests/auth.test.ts".to_owned())
         );
+
+        // 4. Multi-language compiler & test failure fallbacks (Rust test, Python, Go)
+        let rust_test_output =
+            "test tests::smoke ... FAILED\n\ntest result: failed. 0 passed; 1 failed;";
+        assert!(extract_compiler_error_signature(rust_test_output, None).is_some());
+
+        let python_output = "Traceback (most recent call last):\n  File \"app.py\", line 1\nSyntaxError: invalid syntax";
+        assert!(extract_compiler_error_signature(python_output, None).is_some());
+
+        let go_output = "# pkg/app\n--- FAIL: TestHandler (0.00s)\nFAIL\tpkg/app\t0.005s";
+        assert!(extract_compiler_error_signature(go_output, None).is_some());
     }
 }

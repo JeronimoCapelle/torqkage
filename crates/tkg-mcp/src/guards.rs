@@ -606,6 +606,48 @@ pub(crate) fn strip_ansi(input: &str) -> String {
     anstream::adapter::strip_str(input).to_string()
 }
 
+/// Filters diagnostic command output using declarative `keep_regex`,
+/// `drop_regex`, and `max_lines` rules from `[tools.<name>.output_filter]`.
+pub(crate) fn filter_output(input: &str, filter: &tkg_common::tools::ToolOutputFilter) -> String {
+    if filter.is_empty() {
+        return input.to_owned();
+    }
+
+    let keep: Vec<regex::Regex> = filter
+        .keep_regex
+        .iter()
+        .filter_map(|p| regex::Regex::new(p).ok())
+        .collect();
+    let drop: Vec<regex::Regex> = filter
+        .drop_regex
+        .iter()
+        .filter_map(|p| regex::Regex::new(p).ok())
+        .collect();
+
+    let mut filtered: Vec<&str> = Vec::new();
+    for line in input.lines() {
+        if !keep.is_empty() && !keep.iter().any(|re| re.is_match(line)) {
+            continue;
+        }
+        if drop.iter().any(|re| re.is_match(line)) {
+            continue;
+        }
+        filtered.push(line);
+    }
+
+    if let Some(max_lines) = filter.max_lines
+        && filtered.len() > max_lines
+    {
+        let omitted = filtered.len() - max_lines;
+        let mut kept: Vec<&str> = filtered.into_iter().take(max_lines).collect();
+        let notice = format!("[... {omitted} more line(s) pruned by output_filter ...]");
+        kept.push(&notice);
+        return kept.join("\n");
+    }
+
+    filtered.join("\n")
+}
+
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
@@ -1289,5 +1331,29 @@ mod tests {
         assert!(
             check_manifest_protection(cargo_toml, Some("reviewer"), Some(&allowed_guard)).is_ok()
         );
+    }
+
+    #[test]
+    fn test_output_filter_prunes_compiler_noise() {
+        use std::fmt::Write as _;
+
+        let mut log = String::new();
+        for i in 0..998 {
+            writeln!(log, "   Compiling crate_{i} v0.1.0").unwrap();
+        }
+        log.push_str("error[E0308]: mismatched types\n");
+        log.push_str("error: aborting due to 1 previous error\n");
+
+        let filter = tkg_common::tools::ToolOutputFilter {
+            keep_regex: vec!["^error".to_owned()],
+            drop_regex: vec!["^\\s*Compiling ".to_owned()],
+            max_lines: Some(25),
+        };
+
+        let pruned = filter_output(&log, &filter);
+        let lines: Vec<&str> = pruned.lines().collect();
+        assert!(lines.len() < 30, "expected < 30 lines, got {}", lines.len());
+        assert!(pruned.contains("error[E0308]: mismatched types"));
+        assert!(!pruned.contains("Compiling crate_500"));
     }
 }

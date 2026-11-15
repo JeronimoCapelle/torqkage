@@ -119,9 +119,14 @@ pub(crate) fn process_command_output(
     };
 
     let clean_text = crate::guards::strip_ansi(&final_text);
+    let filtered_text = if let Some(filter) = tool.output_filter.as_ref() {
+        crate::guards::filter_output(&clean_text, filter)
+    } else {
+        clean_text
+    };
 
     let truncated = crate::guards::truncate_output(
-        &clean_text,
+        &filtered_text,
         tool.truncate_lines,
         tool.truncate_bytes,
         tool.emit_truncation_notice(),
@@ -272,6 +277,8 @@ where
 }
 
 /// Dispatches tool execution to the appropriate action handler.
+/// Dispatches an incoming MCP tool invocation, optionally enabling universal
+/// in-band MCP circuit breaker tracking for harnesses without native hooks.
 ///
 /// Returns a tuple of `(output_text, is_error)`.
 ///
@@ -285,6 +292,7 @@ pub(crate) fn dispatch_action(
     agent_name: Option<&str>,
     agent_guards: &BTreeMap<String, AgentGuard>,
     available_tools: &[ToolDefinition],
+    in_band_seatbelt: bool,
 ) -> Result<(String, bool), String> {
     evaluate_pre_flight_guards(tool, workspace_root)?;
 
@@ -392,11 +400,24 @@ pub(crate) fn dispatch_action(
         )),
     };
 
-    update_circuit_breaker(tool, workspace_root, effective_agent, execution_result)
+    update_circuit_breaker(
+        tool,
+        workspace_root,
+        effective_agent,
+        execution_result,
+        in_band_seatbelt,
+    )
 }
 
 const fn is_compiler_verification_tool(tool: &ToolDefinition) -> bool {
     tool.tracks_circuit_breaker()
+}
+
+const fn is_command_tool(tool: &ToolDefinition) -> bool {
+    matches!(
+        tool.action,
+        ToolAction::StaticCommand | ToolAction::ParameterizedCommand
+    )
 }
 
 fn update_circuit_breaker(
@@ -404,8 +425,11 @@ fn update_circuit_breaker(
     workspace_root: &Path,
     agent_name: Option<&str>,
     result: Result<(String, bool), String>,
+    in_band_seatbelt: bool,
 ) -> Result<(String, bool), String> {
-    if !is_compiler_verification_tool(tool) {
+    let explicit_tracker = is_compiler_verification_tool(tool);
+    let in_band_command = in_band_seatbelt && is_command_tool(tool);
+    if !explicit_tracker && !in_band_command {
         return result;
     }
 
@@ -420,28 +444,32 @@ fn update_circuit_breaker(
         Ok((mut output, is_error)) => {
             if is_error {
                 let error_sig = extract_compiler_error_signature(&output, custom_pattern);
-                if let Err(e) = ledger.record_failure(
-                    workspace_root,
-                    agent_name,
-                    Some(&tool.name),
-                    error_sig.as_deref().or(Some("Quality gate failure")),
-                    Some(&output),
-                ) {
-                    eprintln!("tkg-mcp: warning: failed to record circuit breaker failure: {e}");
-                }
-                if ledger.tripped {
-                    let banner = format!(
-                        "\n\n🛑 [CIRCUIT BREAKER TRIPPED - {}/{} FAILURES]:\n\
-                         Consecutive verification/gate failures reached threshold ({}).\n\
-                         Last failure signature: {}\n\
-                         Further autonomous code modifications are now GATED by policy hook.\n\
-                         Operator intervention or manual repair is required.",
-                        ledger.consecutive_failures,
-                        ledger.max_strikes,
-                        ledger.max_strikes,
-                        ledger.last_error_signature.as_deref().unwrap_or("unknown")
-                    );
-                    output.push_str(&banner);
+                if explicit_tracker || error_sig.is_some() {
+                    if let Err(e) = ledger.record_failure(
+                        workspace_root,
+                        agent_name,
+                        Some(&tool.name),
+                        error_sig.as_deref().or(Some("Quality gate failure")),
+                        Some(&output),
+                    ) {
+                        eprintln!(
+                            "tkg-mcp: warning: failed to record circuit breaker failure: {e}"
+                        );
+                    }
+                    if ledger.tripped {
+                        let banner = format!(
+                            "\n\n🛑 [CIRCUIT BREAKER TRIPPED - {}/{} FAILURES]:\n\
+                             Consecutive verification/gate failures reached threshold ({}).\n\
+                             Last failure signature: {}\n\
+                             Further autonomous code modifications are now GATED.\n\
+                             Run 'tkg -r' in your terminal (or call 'inspect_circuit_breaker') to unlock.",
+                            ledger.consecutive_failures,
+                            ledger.max_strikes,
+                            ledger.max_strikes,
+                            ledger.last_error_signature.as_deref().unwrap_or("unknown")
+                        );
+                        output.push_str(&banner);
+                    }
                 }
             } else if let Err(e) = ledger.record_success(workspace_root, Some(&tool.name)) {
                 eprintln!("tkg-mcp: warning: failed to record circuit breaker success: {e}");
@@ -454,13 +482,15 @@ fn update_circuit_breaker(
             }
 
             let error_sig = extract_compiler_error_signature(&err, custom_pattern);
-            if let Err(e) = ledger.record_failure(
-                workspace_root,
-                agent_name,
-                Some(&tool.name),
-                error_sig.as_deref().or(Some("Execution failure")),
-                Some(&err),
-            ) {
+            if (explicit_tracker || error_sig.is_some())
+                && let Err(e) = ledger.record_failure(
+                    workspace_root,
+                    agent_name,
+                    Some(&tool.name),
+                    error_sig.as_deref().or(Some("Execution failure")),
+                    Some(&err),
+                )
+            {
                 eprintln!("tkg-mcp: warning: failed to record circuit breaker failure: {e}");
             }
             Err(err)
@@ -613,6 +643,7 @@ mod tests {
             &temp_dir,
             Some("worker_agent"),
             Ok(("error[E0502]: borrow error".to_owned(), true)),
+            false,
         )
         .unwrap();
         assert!(res1.1);
@@ -624,6 +655,7 @@ mod tests {
             &temp_dir,
             Some("worker_agent"),
             Ok(("error[E0502]: borrow error".to_owned(), true)),
+            false,
         )
         .unwrap();
         assert!(res2.1);
@@ -635,6 +667,7 @@ mod tests {
             &temp_dir,
             Some("worker_agent"),
             Ok(("Clean check".to_owned(), false)),
+            false,
         )
         .unwrap();
         assert!(!res3.1);
@@ -674,6 +707,7 @@ mod tests {
             &temp_dir,
             Some("worker_agent"),
             Err("Validation error: Argument 'strategy' with value 'invalid_xyz' is not one of allowed enum values: rebase, squash".to_owned()),
+            false,
         );
         assert!(err1.is_err_and(|e| e.contains("Validation error")));
 
@@ -682,6 +716,7 @@ mod tests {
             &temp_dir,
             Some("worker_agent"),
             Err("Missing required argument 'agent' for tool 'merge_agent_workspace'".to_owned()),
+            false,
         );
         assert!(err2.is_err_and(|e| e.contains("Missing required argument")));
 
@@ -745,7 +780,7 @@ mod tests {
         let tools = vec![tool.clone()];
 
         let (out, is_err) =
-            dispatch_action(&tool, &temp_dir, &args, None, &guards, &tools).unwrap();
+            dispatch_action(&tool, &temp_dir, &args, None, &guards, &tools, false).unwrap();
         assert!(!is_err);
         assert!(out.contains("doc-author"));
 
@@ -839,8 +874,16 @@ mod tests {
         let guards = BTreeMap::new();
         let tools = vec![tool.clone()];
 
-        let (out, is_err) =
-            dispatch_action(&tool, &temp_dir, &args, Some("planner"), &guards, &tools).unwrap();
+        let (out, is_err) = dispatch_action(
+            &tool,
+            &temp_dir,
+            &args,
+            Some("planner"),
+            &guards,
+            &tools,
+            false,
+        )
+        .unwrap();
         assert!(!is_err);
         assert!(out.contains("Session handoff successfully recorded"));
         assert!(out.contains("ReadyForDV"));

@@ -173,6 +173,26 @@ pub struct RawTool {
     pub error_fallback: Option<String>,
     pub empty_fallback: Option<String>,
     pub success_exit_codes: Option<Vec<i32>>,
+    pub output_filter: Option<ToolOutputFilter>,
+}
+
+/// Declarative line filtering & diagnostic pruning rules (`[tools.<name>.output_filter]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ToolOutputFilter {
+    #[serde(default)]
+    pub keep_regex: Vec<String>,
+    #[serde(default)]
+    pub drop_regex: Vec<String>,
+    #[serde(default)]
+    pub max_lines: Option<usize>,
+}
+
+impl ToolOutputFilter {
+    /// Returns `true` when no keep, drop, or max-line pruning rules are configured.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.keep_regex.is_empty() && self.drop_regex.is_empty() && self.max_lines.is_none()
+    }
 }
 
 /// Configuration container holding base tools, category defaults, and resolved
@@ -230,6 +250,8 @@ pub struct ToolDefinition {
     pub empty_fallback: Option<String>,
     #[serde(default)]
     pub success_exit_codes: Vec<i32>,
+    #[serde(default)]
+    pub output_filter: Option<ToolOutputFilter>,
 }
 
 impl ToolDefinition {
@@ -411,6 +433,28 @@ fn resolve_preconditions(
     }
 }
 
+fn resolve_output_filter(
+    raw: &RawTool,
+    base: Option<&RawTool>,
+    category: Option<&RawTool>,
+) -> Option<ToolOutputFilter> {
+    let mut merged = ToolOutputFilter::default();
+    for source in [category, base, Some(raw)].into_iter().flatten() {
+        if let Some(ref f) = source.output_filter {
+            if !f.keep_regex.is_empty() {
+                merged.keep_regex.clone_from(&f.keep_regex);
+            }
+            if !f.drop_regex.is_empty() {
+                merged.drop_regex.clone_from(&f.drop_regex);
+            }
+            if f.max_lines.is_some() {
+                merged.max_lines = f.max_lines;
+            }
+        }
+    }
+    (!merged.is_empty()).then_some(merged)
+}
+
 /// Merges a raw tool definition with its optional category defaults and base
 /// definition.
 #[must_use]
@@ -484,6 +528,7 @@ pub fn merge_tool_with_category(
             t.success_exit_codes.clone()
         })
         .unwrap_or_default(),
+        output_filter: resolve_output_filter(raw, base, category),
     }
 }
 
@@ -741,5 +786,36 @@ mod tests {
         assert!(rendered.contains("at line 2, column"));
 
         std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_output_filter_parsing_and_category_inheritance() {
+        let toml = r#"
+            [categories.command]
+            [categories.command.output_filter]
+            drop_regex = ["^\\s*Compiling "]
+            max_lines = 40
+
+            [tools.cargo_build]
+            description = "Build workspace"
+            category = "command"
+            action = "static_command"
+            command = ["cargo", "build"]
+
+            [tools.cargo_build.output_filter]
+            keep_regex = ["^error"]
+            max_lines = 15
+        "#;
+
+        let raw = RawToolsConfig::parse(toml).unwrap();
+        let resolved = resolve(&raw);
+        let build = resolved.iter().find(|t| t.name == "cargo_build").unwrap();
+        let filter = build
+            .output_filter
+            .as_ref()
+            .expect("output_filter resolved");
+        assert_eq!(filter.keep_regex, vec!["^error"]);
+        assert_eq!(filter.drop_regex, vec!["^\\s*Compiling "]);
+        assert_eq!(filter.max_lines, Some(15));
     }
 }
