@@ -78,7 +78,6 @@ pub(crate) fn execute(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use tkg_common::{PipelineHandoff, TkgStatePaths};
 
@@ -93,8 +92,8 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::remove_dir_all(&temp_dir));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let args = serde_json::json!({
             "summary": "Completed parser implementation",
@@ -123,6 +122,6 @@ mod tests {
             vec!["src/parser.rs", "tests/parser_tests.rs"]
         );
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

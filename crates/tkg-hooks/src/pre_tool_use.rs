@@ -96,7 +96,12 @@ fn evaluate_pre_tool_use_checked(
                 }
             },
             "subagent_admission" => {
-                if tool_name == "invoke_subagent" {
+                if config
+                    .pre_tool_use
+                    .subagent_tools
+                    .iter()
+                    .any(|t| t == tool_name)
+                {
                     let resp = subagent_gate::evaluate_tool_invocation(input);
                     if resp.decision != HookDecision::Allow {
                         return Ok(resp);
@@ -281,7 +286,6 @@ fn extract_new_content(args: &serde_json::Value, original: &str) -> Option<Strin
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use serde_json::json;
     use tkg_common::models::ToolCallPayload;
@@ -356,7 +360,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
         drop(std::fs::write(
             temp_dir.join("tools.toml"),
             r#"
@@ -434,7 +438,7 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
         let res_skipped = evaluate_pre_tool_use(&input_skipped, &temp_dir, &config);
         assert_eq!(res_skipped.decision, HookDecision::Allow);
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -447,7 +451,7 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
         drop(std::fs::create_dir_all(
             temp_dir.join("plugins/torqkage/agents"),
         ));
-        drop(std::fs::create_dir_all(temp_dir.join("src")));
+        _ = std::fs::create_dir_all(temp_dir.join("src"));
 
         let scoped_agent_manifest = "---\nname: comments_restricted_agent\nallowed_dirs:\n  - docs\n  - src\npath_policies:\n  - path: src\n    filter: comments_only\n---\n";
         std::fs::write(
@@ -529,6 +533,6 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
         let res_docs = evaluate_pre_tool_use(&input_docs, &temp_dir, &config);
         assert_eq!(res_docs.decision, HookDecision::Allow);
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

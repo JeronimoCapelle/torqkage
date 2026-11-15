@@ -40,8 +40,8 @@ impl ChildGuard {
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         if matches!(self.child.try_wait(), Ok(None)) {
-            drop(self.child.kill());
-            drop(self.child.wait());
+            _ = self.child.kill();
+            _ = self.child.wait();
         }
     }
 }
@@ -85,11 +85,11 @@ impl SubprocessSupervisor {
 
             let worker = std::thread::spawn(move || {
                 let res = child.wait_with_output();
-                drop(tx.send(res));
+                _ = tx.send(res);
             });
 
             if let Ok(res) = rx.recv_timeout(timeout_dur) {
-                drop(worker.join());
+                _ = worker.join();
                 res.map_err(|err| format!("Failed to read process output: {err}"))
             } else {
                 // Timeout expired: kill process group with SIGKILL via safe nix
@@ -100,10 +100,8 @@ impl SubprocessSupervisor {
                         && pgid > 0
                     {
                         let pid = nix::unistd::Pid::from_raw(pgid);
-                        let _killpg_res =
-                            nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGKILL);
-                        let _kill_res =
-                            nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+                        _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGKILL);
+                        _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
                     }
                 }
                 #[cfg(not(unix))]
@@ -115,7 +113,7 @@ impl SubprocessSupervisor {
                 // Allow grace duration for worker to unblock post-kill; avoid
                 // indefinite deadlock
                 if rx.recv_timeout(PROCESS_KILL_GRACE_WAIT).is_ok() {
-                    drop(worker.join());
+                    _ = worker.join();
                 }
                 Err(format!(
                     "Execution timed out after {timeout_seconds}s and was terminated."
@@ -130,11 +128,6 @@ impl SubprocessSupervisor {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
 
@@ -142,7 +135,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn test_timeout_kills_grandchildren_in_process_group() {
         let pid_file = std::env::temp_dir().join(format!("tkg_sup_gc_{}", std::process::id()));
-        drop(std::fs::remove_file(&pid_file));
+        _ = std::fs::remove_file(&pid_file);
 
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
@@ -165,7 +158,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        drop(std::fs::remove_file(&pid_file));
+        _ = std::fs::remove_file(&pid_file);
         assert!(gone, "grandchild process {grandchild} leaked after timeout");
     }
 }

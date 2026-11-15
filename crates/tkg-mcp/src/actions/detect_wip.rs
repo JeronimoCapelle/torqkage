@@ -23,7 +23,6 @@ pub(crate) fn execute(workspace_root: &Path, arguments: &serde_json::Value) -> (
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 
@@ -36,12 +35,12 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let (out, is_err) = execute(&temp_dir, &serde_json::json!({}));
         assert!(!is_err);
         assert!(out.contains("Working copy") || out.contains("[Notice: Files modified"));
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

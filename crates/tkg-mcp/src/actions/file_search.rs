@@ -172,8 +172,7 @@ fn resolve_search_targets(
     project: &ProjectConfig,
     path_arg: Option<&str>,
 ) -> Result<(Vec<std::path::PathBuf>, bool), String> {
-    let is_docs_tool = tool.category.as_deref() == Some("documentation")
-        || project.docs.tool_name.as_deref() == Some(&tool.name);
+    let is_docs_tool = tool.is_documentation_tool(project);
 
     if let Some(custom) = path_arg {
         let safe_target = if tool.enforce_workspace_bounds() {
@@ -315,14 +314,7 @@ fn walk_and_search(
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    clippy::assertions_on_result_states,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use serde_json::json;
 
@@ -430,7 +422,7 @@ mod tests {
         assert!(result_arch.contains("ARCHITECTURE.md:2: CACHE_LINE_SIZE is tuned"));
         assert!(!result_arch.contains("docs/specs.md"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -461,7 +453,7 @@ mod tests {
         assert!(result.contains("docs/spec.md:4: OPCODE_RET = 0x20;"));
         assert!(!result.contains("DATA_STORE"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -491,7 +483,7 @@ mod tests {
         assert!(result.contains("docs/spec.md:3: OPCODE_CALL = 0x10;"));
         assert!(result.contains("docs/spec.md:4: OPCODE_RET = 0x20;"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -511,7 +503,7 @@ mod tests {
         let err = execute(&tool, &temp, &args).unwrap_err();
         assert!(err.contains("Invalid regex pattern"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -540,7 +532,7 @@ mod tests {
         let result = execute(&tool, &temp, &args).expect("fallback to literal search");
         assert!(result.contains("Special line: unclosed(paren in text"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -574,7 +566,7 @@ mod tests {
         assert!(res_lower.contains("lowercase = 1;"));
         assert!(!res_lower.contains("UPPERCASE = 2;"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -603,7 +595,7 @@ mod tests {
         assert!(result.contains("Line with literal: OPCODE_[A-Z]+"));
         assert!(!result.contains("Other line: OPCODE_CALL"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -629,7 +621,7 @@ mod tests {
         assert!(!result.contains("src/main.rs"));
         assert!(result.contains("No documentation or specification paths found on disk"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -665,6 +657,6 @@ mod tests {
                 .is_err_and(|e| e.contains("Security policy violation"))
         );
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 }

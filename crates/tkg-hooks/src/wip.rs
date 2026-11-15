@@ -4,7 +4,7 @@ use std::path::Path;
 
 use tkg_common::PreInvocationResponse;
 
-use crate::stdin::{read_pre_invocation_input, write_pre_invocation_response};
+use crate::stdin::{read_pre_invocation_context, write_pre_invocation_for_context};
 
 /// Executes the `detect-wip` hook.
 ///
@@ -13,14 +13,18 @@ use crate::stdin::{read_pre_invocation_input, write_pre_invocation_response};
 /// ephemeral notification. If unchanged or clean, emits `{}` burning zero
 /// tokens.
 pub(crate) fn execute() -> std::process::ExitCode {
-    let input = read_pre_invocation_input();
+    let (input, claude_payload) = read_pre_invocation_context();
 
     let root = input.common.resolve_workspace_root();
     let config = match crate::config::HooksConfig::try_load(&root) {
         Ok(cfg) => cfg,
         Err(err) => {
             eprintln!("tkg-hooks: {err}");
-            write_pre_invocation_response(&PreInvocationResponse::empty());
+            write_pre_invocation_for_context(
+                &PreInvocationResponse::empty(),
+                &root,
+                claude_payload,
+            );
             return std::process::ExitCode::FAILURE;
         },
     };
@@ -31,7 +35,7 @@ pub(crate) fn execute() -> std::process::ExitCode {
         PreInvocationResponse::empty()
     };
 
-    write_pre_invocation_response(&resp);
+    write_pre_invocation_for_context(&resp, &root, claude_payload);
     std::process::ExitCode::SUCCESS
 }
 
@@ -49,7 +53,6 @@ fn detect_wip_changes(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 

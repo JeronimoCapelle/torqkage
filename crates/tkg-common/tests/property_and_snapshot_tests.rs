@@ -1,13 +1,6 @@
 //! Property-based (`proptest`) and snapshot (`insta`) verification suite for
 //! `tkg-common`.
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::tests_outside_test_module,
-    reason = "Integration property and snapshot test suite"
-)]
-
 use std::path::Path;
 
 use proptest::prelude::*;
@@ -131,10 +124,10 @@ proptest! {
 
     #[test]
     fn prop_arbitrary_inputs_never_panic_parsers(raw in "\\PC*") {
-        drop(AgentFrontmatter::parse(&raw));
-        drop(extract_compiler_error_signature(&raw, None));
-        drop(check_dangerous_files_with_security(Path::new(&raw), None));
-        drop(strip_delimited_and_normalize(&raw, "/*", "*/"));
+        _ = AgentFrontmatter::parse(&raw);
+        _ = extract_compiler_error_signature(&raw, None);
+        _ = check_dangerous_files_with_security(Path::new(&raw), None);
+        _ = strip_delimited_and_normalize(&raw, "/*", "*/");
     }
 }
 

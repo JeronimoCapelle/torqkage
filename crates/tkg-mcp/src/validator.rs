@@ -73,7 +73,7 @@ pub(crate) fn validate_tools(tools: &[ToolDefinition]) -> ValidationReport {
 
                 if let Some(binary) = tool.primary_binary() {
                     if which::which(binary).is_ok() {
-                        report.verified_tools = report.verified_tools.saturating_add(1);
+                        report.verified_tools += 1;
                     } else {
                         report
                             .missing_binaries
@@ -99,7 +99,7 @@ pub(crate) fn validate_tools(tools: &[ToolDefinition]) -> ValidationReport {
             | ToolAction::RecordSessionHandoff
             | ToolAction::DetectWip => {
                 // In-process native actions are always verified
-                report.verified_tools = report.verified_tools.saturating_add(1);
+                report.verified_tools += 1;
             },
             ToolAction::Unknown(ref act) => {
                 report.warnings.push(format!(
@@ -114,13 +114,7 @@ pub(crate) fn validate_tools(tools: &[ToolDefinition]) -> ValidationReport {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 

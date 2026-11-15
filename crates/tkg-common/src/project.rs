@@ -553,7 +553,11 @@ impl ProjectConfig {
         }
         candidates.push(workspace_root.join(".tkg/project.toml"));
         candidates.push(workspace_root.join("project.toml"));
-        candidates.push(workspace_root.join("plugins/torqkage/project.toml"));
+        candidates.push(
+            workspace_root
+                .join(crate::harness::local_plugin_rel_dir())
+                .join("project.toml"),
+        );
         if let Ok(home) = std::env::var("HOME") {
             let home_path = PathBuf::from(home);
             candidates.push(home_path.join(".tkg/project.toml"));
@@ -571,12 +575,24 @@ impl ProjectConfig {
                     let inferred = Self::infer_from_workspace(workspace_root);
                     cfg.project.language = inferred.project.language;
                 }
+                if !has_explicit_harness(&content)
+                    && let Some(detected) = crate::harness::detect_workspace_harness(workspace_root)
+                {
+                    if let Some(ref mut h) = cfg.harness {
+                        detected.clone_into(&mut h.harness);
+                    } else {
+                        detected.clone_into(&mut cfg.runner.harness);
+                    }
+                }
                 return cfg;
             }
         }
 
         let mut cfg = Self::infer_from_workspace(workspace_root);
         cfg.docs.paths = Self::detect_default_docs_paths(workspace_root);
+        if let Some(detected) = crate::harness::detect_workspace_harness(workspace_root) {
+            detected.clone_into(&mut cfg.runner.harness);
+        }
         cfg
     }
 
@@ -1106,6 +1122,20 @@ impl RawRunnerSection {
     }
 }
 
+fn has_explicit_harness(content: &str) -> bool {
+    let Ok(table) = toml::from_str::<toml::Table>(content) else {
+        return false;
+    };
+    ["runner", "harness"].iter().any(|key| {
+        table.get(*key).is_some_and(|val| {
+            val.is_str()
+                || val
+                    .as_table()
+                    .is_some_and(|t| t.contains_key("harness") || t.contains_key("name"))
+        })
+    })
+}
+
 #[derive(Deserialize, Default)]
 struct RawProjectToml {
     #[serde(default)]
@@ -1196,8 +1226,6 @@ impl RawProjectToml {
 
 #[cfg(test)]
 #[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
     clippy::indexing_slicing,
     clippy::let_underscore_must_use,
     reason = "Unit test assertions"
@@ -1331,7 +1359,7 @@ filter = "tests_only"
         assert!(cfg.gates.is_empty());
         assert_eq!(cfg.sandbox.bind_mounts, vec!["target"]);
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -1351,7 +1379,7 @@ filter = "tests_only"
         assert!(cfg.gates.is_empty());
         assert_eq!(cfg.sandbox.bind_mounts, vec![".zig-cache", "zig-out"]);
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -1434,7 +1462,7 @@ docs = ["specs", "ARCHITECTURE.md"]
         assert!(cfg.docs.paths.contains(&"docs".to_owned()));
         assert!(cfg.docs.paths.contains(&"ARCHITECTURE.md".to_owned()));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]

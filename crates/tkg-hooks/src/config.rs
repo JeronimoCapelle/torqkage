@@ -64,11 +64,17 @@ fn default_pipeline() -> Vec<String> {
     ]
 }
 
+fn default_subagent_tools() -> Vec<String> {
+    vec!["invoke_subagent".to_owned()]
+}
+
 /// Pre-tool-use pipeline configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(crate) struct PreToolUseConfig {
     #[serde(default = "default_pipeline")]
     pub(crate) pipeline: Vec<String>,
+    #[serde(default = "default_subagent_tools")]
+    pub(crate) subagent_tools: Vec<String>,
     #[serde(default)]
     pub(crate) custom_checks: Vec<CustomCheck>,
 }
@@ -77,6 +83,7 @@ impl Default for PreToolUseConfig {
     fn default() -> Self {
         Self {
             pipeline: default_pipeline(),
+            subagent_tools: default_subagent_tools(),
             custom_checks: Vec::new(),
         }
     }
@@ -338,12 +345,7 @@ pub(crate) fn parse_hooks_config(content: &str) -> tkg_common::Result<HooksConfi
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "Unit test assertions and indexing"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions and indexing")]
 mod tests {
     use super::*;
 

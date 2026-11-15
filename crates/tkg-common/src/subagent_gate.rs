@@ -94,11 +94,7 @@ pub fn check_subagent_admission(
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::assert_is_empty,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::assert_is_empty, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 

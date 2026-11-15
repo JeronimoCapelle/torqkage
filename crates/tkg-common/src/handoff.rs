@@ -129,7 +129,6 @@ pub fn read_last_handoff_message(workspace_root: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 
@@ -142,7 +141,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let (handoff, record) = record_session_handoff(
             &temp_dir,
@@ -168,7 +167,7 @@ mod tests {
         assert!(msg.contains("coder' to 'finisher'"));
         assert!(msg.contains("Implemented new handoff module"));
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

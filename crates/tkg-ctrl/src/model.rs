@@ -347,7 +347,6 @@ pub(crate) fn discover_agents(workspace_root: &Path) -> Vec<AgentManifest> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 
@@ -430,7 +429,7 @@ You are a test agent. Always pass tests.
     #[test]
     fn test_update_tool_permission_gate_in_file() {
         let temp_dir = std::env::temp_dir().join(format!("tkg_test_gate_{}", std::process::id()));
-        drop(fs::create_dir_all(&temp_dir));
+        _ = fs::create_dir_all(&temp_dir);
         let toml_file = temp_dir.join("tools.toml");
 
         let initial = "# Initial tools configuration\n[tools.run_tests]\n# Important comment to preserve\ndescription = \"Run tests\"\ncommand = [\"cargo\", \"test\"]\n";
@@ -448,6 +447,6 @@ You are a test agent. Always pass tests.
         assert!(!content_disabled.contains("require_permission_gate = true"));
         assert!(content_disabled.contains("# Important comment to preserve"));
 
-        drop(fs::remove_dir_all(&temp_dir));
+        _ = fs::remove_dir_all(&temp_dir);
     }
 }

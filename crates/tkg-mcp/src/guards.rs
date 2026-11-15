@@ -338,7 +338,7 @@ fn resolve_in_subcrates(
             for scope in scopes {
                 let candidate = entry_path.join(scope).join(clean);
                 if candidate.exists() {
-                    match_count = match_count.saturating_add(1);
+                    match_count += 1;
                     unique_match = Some(format!("{container}/{crate_name}/{scope}/{clean}"));
                 }
             }
@@ -607,14 +607,7 @@ pub(crate) fn strip_ansi(input: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    clippy::assertions_on_result_states,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use tkg_common::path_matches_pattern;
 
@@ -653,7 +646,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&root));
+        _ = std::fs::create_dir_all(&root);
         drop(std::fs::write(
             root.join("project.toml"),
             "[workspace]\ncontainers = [\"crates\"]\n",
@@ -668,7 +661,7 @@ mod tests {
             resolve_safe_path(&root, "docs/fixtures/tests/sample.rs", &allowed, false).is_err()
         );
 
-        drop(std::fs::remove_dir_all(&root));
+        _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1021,7 +1014,7 @@ mod tests {
     #[test]
     fn test_resolve_scoped_path_str_single_crate() {
         let root = std::env::temp_dir().join(format!("tkg_scope_test_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&root));
+        _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src/auth")).expect("create src/auth");
         std::fs::create_dir_all(root.join("docs/specs")).expect("create docs/specs");
         std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"demo\"\n")
@@ -1119,13 +1112,13 @@ mod tests {
             "tests/unit_test.rs"
         );
 
-        drop(std::fs::remove_dir_all(&root));
+        _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn test_resolve_scoped_path_str_tools_and_new_files() {
         let root = std::env::temp_dir().join(format!("tkg_scope_tools_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&root));
+        _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src/auth")).expect("create src/auth");
         std::fs::create_dir_all(root.join("docs/specs")).expect("create docs/specs");
         std::fs::write(root.join("docs/specs/rv32.md"), "# RV32").expect("write rv32.md");
@@ -1167,13 +1160,13 @@ mod tests {
             "src/auth/jwt.rs"
         );
 
-        drop(std::fs::remove_dir_all(&root));
+        _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn test_resolve_scoped_path_str_multi_crate() {
         let root = std::env::temp_dir().join(format!("tkg_multi_crate_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&root));
+        _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("crates/core/src")).expect("create crates/core/src");
         std::fs::create_dir_all(root.join("crates/api/src")).expect("create crates/api/src");
         std::fs::write(
@@ -1259,7 +1252,7 @@ mod tests {
             "crates/core/src/token.rs"
         );
 
-        drop(std::fs::remove_dir_all(&root));
+        _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

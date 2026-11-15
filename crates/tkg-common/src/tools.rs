@@ -108,10 +108,6 @@ pub struct ToolSafetyPolicy {
 }
 
 /// Sandbox and filesystem confinement boundaries.
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "Mirrors independent declarative tools.toml boolean policy flags"
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ToolSandboxPolicy {
     #[serde(default)]
@@ -281,6 +277,18 @@ impl ToolDefinition {
     #[must_use]
     pub const fn emit_truncation_notice(&self) -> bool {
         self.formatting.emit_truncation_notice
+    }
+
+    /// Returns `true` when this tool serves project documentation (via explicit
+    /// `[docs] tool_name` or a case-insensitive `"documentation"`/`"docs"` category).
+    #[must_use]
+    pub fn is_documentation_tool(&self, project: &crate::project::ProjectConfig) -> bool {
+        project.docs.tool_name.as_deref() == Some(&self.name)
+            || self.category.as_deref().is_some_and(|c| {
+                let trimmed = c.trim();
+                trimmed.eq_ignore_ascii_case("documentation")
+                    || trimmed.eq_ignore_ascii_case("docs")
+            })
     }
 
     #[must_use]
@@ -617,11 +625,6 @@ impl RawToolsConfig {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
 

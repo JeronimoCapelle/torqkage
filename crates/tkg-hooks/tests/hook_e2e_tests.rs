@@ -1,14 +1,5 @@
 //! End-to-end integration tests for `tkg-hooks` lifecycle hook CLI.
 
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::tests_outside_test_module,
-    clippy::collapsible_if,
-    reason = "Integration test assertions"
-)]
-
 use std::{
     io::Write,
     process::{Command, Stdio},
@@ -24,6 +15,10 @@ fn run_hook_subcommand(subcmd: &str, stdin_json: Option<&str>) -> (bool, String,
     (code == Some(0), stdout, stderr)
 }
 
+#[allow(
+    clippy::expect_used,
+    reason = "Integration test helper panics on spawn or pipe failure"
+)]
 fn run_hook_subcommand_with_env(
     subcmd: &str,
     stdin_json: Option<&str>,
@@ -45,12 +40,12 @@ fn run_hook_subcommand_with_env(
 
     let mut child = cmd.spawn().expect("failed to spawn tkg-hooks binary");
 
-    if let Some(json) = stdin_json {
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(json.as_bytes())
-                .expect("write to stdin failed");
-        }
+    if let Some(json) = stdin_json
+        && let Some(mut stdin) = child.stdin.take()
+    {
+        stdin
+            .write_all(json.as_bytes())
+            .expect("write to stdin failed");
     }
 
     let output = child
@@ -115,7 +110,7 @@ fn test_record_handoff_and_inject_wake_roundtrip_e2e() {
     assert_eq!(wake_resp.inject_steps.len(), 1);
 
     // Clean up temp workspace
-    drop(std::fs::remove_dir_all(&temp_workspace));
+    _ = std::fs::remove_dir_all(&temp_workspace);
 }
 
 #[test]
@@ -423,6 +418,130 @@ fn test_corrupt_hooks_and_tools_toml_fail_closed_e2e() {
             .pointer("/hookSpecificOutput/permissionDecisionReason")
             .and_then(serde_json::Value::as_str)
             .is_some()
+    );
+
+    std::fs::remove_dir_all(&ws).expect("cleanup");
+}
+
+#[test]
+fn test_claude_session_start_pre_invocation_and_custom_subagent_tools_e2e() {
+    let ws = std::env::temp_dir().join(format!(
+        "tkg_test_claude_hooks_custom_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(ws.join(".tkg/agents")).expect("create .tkg/agents");
+    std::fs::write(
+        ws.join(".tkg/project.toml"),
+        "[gates.failing_gate]\ncommand = [\"false\"]\n",
+    )
+    .expect("write project.toml");
+    std::fs::write(
+        ws.join(".tkg/agents/worker.md"),
+        "---\nname: worker\ndescription: Worker\npre_launch_checks:\n  - failing_gate\n---\n\n# Worker\n",
+    )
+    .expect("write worker manifest");
+    std::fs::write(
+        ws.join(".tkg/hooks.toml"),
+        "[pre_tool_use]\nsubagent_tools = [\"delegate_agent\"]\n",
+    )
+    .expect("write hooks.toml");
+
+    // 1. Custom subagent_tools blocks unpermitted write inside subagent dispatch
+    let subagent_call = serde_json::json!({
+        "session_id": "claude-sub-1",
+        "cwd": ws,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "delegate_agent",
+        "tool_input": {
+            "TypeName": "worker",
+            "tool_name": "write_file"
+        }
+    })
+    .to_string();
+    let (code_sub, stdout_sub, _) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&subagent_call), &[]);
+    assert_eq!(code_sub, Some(2));
+    let v_sub: serde_json::Value = serde_json::from_str(&stdout_sub).expect("valid Claude JSON");
+    assert_eq!(
+        v_sub
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+
+    // 2. Claude Stop + SessionStart roundtrip emits hookSpecificOutput.additionalContext
+    let stop_payload = serde_json::json!({
+        "session_id": "claude-stop-1",
+        "cwd": ws,
+        "hook_event_name": "Stop",
+        "termination_reason": "NO_TOOL_CALL"
+    })
+    .to_string();
+    let (code_stop, _, stderr_stop) =
+        run_hook_subcommand_with_env("record-handoff", Some(&stop_payload), &[]);
+    assert_eq!(code_stop, Some(0), "stderr: {stderr_stop}");
+
+    let start_payload = serde_json::json!({
+        "session_id": "claude-start-1",
+        "cwd": ws,
+        "hook_event_name": "SessionStart"
+    })
+    .to_string();
+    let (code_start, stdout_start, stderr_start) =
+        run_hook_subcommand_with_env("inject-wake", Some(&start_payload), &[]);
+    assert_eq!(code_start, Some(0), "stderr: {stderr_start}");
+    let v_start: serde_json::Value =
+        serde_json::from_str(&stdout_start).expect("valid Claude SessionStart JSON");
+    assert_eq!(
+        v_start
+            .pointer("/hookSpecificOutput/hookEventName")
+            .and_then(serde_json::Value::as_str),
+        Some("SessionStart")
+    );
+    assert!(
+        v_start
+            .pointer("/hookSpecificOutput/additionalContext")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| !s.is_empty()),
+        "expected non-empty SessionStart additionalContext: {stdout_start}"
+    );
+
+    // 3. Claude UserPromptSubmit (PreInvocation via detect-wip) emits
+    //    UserPromptSubmit hookSpecificOutput when workspace has uncommitted VCS changes
+    let git_init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&ws)
+        .status()
+        .expect("git init");
+    assert!(git_init.success());
+    std::fs::write(ws.join("dirty.txt"), "uncommitted change\n").expect("write dirty.txt");
+    let prompt_payload = serde_json::json!({
+        "session_id": "claude-prompt-1",
+        "cwd": ws,
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "Continue working"
+    })
+    .to_string();
+    let (code_wip, stdout_wip, stderr_wip) =
+        run_hook_subcommand_with_env("detect-wip", Some(&prompt_payload), &[]);
+    assert_eq!(code_wip, Some(0), "stderr: {stderr_wip}");
+    let v_wip: serde_json::Value =
+        serde_json::from_str(&stdout_wip).expect("valid Claude UserPromptSubmit JSON");
+    assert_eq!(
+        v_wip
+            .pointer("/hookSpecificOutput/hookEventName")
+            .and_then(serde_json::Value::as_str),
+        Some("UserPromptSubmit")
+    );
+    assert!(
+        v_wip
+            .pointer("/hookSpecificOutput/additionalContext")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("dirty.txt")),
+        "expected WIP path in additionalContext: {stdout_wip}"
     );
 
     std::fs::remove_dir_all(&ws).expect("cleanup");

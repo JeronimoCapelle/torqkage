@@ -35,11 +35,6 @@ pub(crate) fn execute(workspace_root: &Path) -> (String, bool) {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use tkg_common::TkgStatePaths;
 
@@ -58,7 +53,7 @@ mod tests {
     #[test]
     fn test_project_state_includes_docs_when_configured() {
         let temp = std::env::temp_dir().join(format!("tkg_state_docs_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
         std::fs::create_dir_all(&temp).expect("create temp dir");
         std::fs::write(
             temp.join("project.toml"),
@@ -72,13 +67,13 @@ mod tests {
             "- Documentation & Specs: docs, specs/rv32.md (search via 'search_spec_docs')"
         ));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
     fn test_project_state_includes_handoff_context() {
         let temp = std::env::temp_dir().join(format!("tkg_state_handoff_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
         let paths = TkgStatePaths::new(&temp);
         std::fs::create_dir_all(paths.state_dir()).expect("create state dir");
 
@@ -103,6 +98,6 @@ mod tests {
         );
         assert!(output.contains("Completed architectural blueprint for RISC-V decoder"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 }

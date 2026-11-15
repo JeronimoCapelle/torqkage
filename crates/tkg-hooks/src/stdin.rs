@@ -68,6 +68,42 @@ pub(crate) trait HookDialect: Send + Sync {
     }
 }
 
+fn normalize_common_from_raw(raw: &str, common: &mut CommonHookPayload) {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return;
+    };
+    if common.workspace_paths.is_empty()
+        && let Some(cwd) = val.get("cwd").and_then(serde_json::Value::as_str)
+    {
+        common.workspace_paths = vec![std::path::PathBuf::from(cwd)];
+    }
+    if common.conversation_id.is_none()
+        && let Some(session_id) = val.get("session_id").and_then(serde_json::Value::as_str)
+    {
+        common.conversation_id = Some(session_id.to_owned());
+    }
+    if common.transcript_path.is_none()
+        && let Some(tp) = val
+            .get("transcript_path")
+            .and_then(serde_json::Value::as_str)
+    {
+        common.transcript_path = Some(std::path::PathBuf::from(tp));
+    }
+}
+
+fn extract_inject_steps_text(steps: &[tkg_common::InjectStep]) -> String {
+    steps
+        .iter()
+        .map(|step| match step {
+            tkg_common::InjectStep::System { system_message } => system_message.text.as_str(),
+            tkg_common::InjectStep::User { user_message } => user_message.as_str(),
+            tkg_common::InjectStep::Ephemeral { ephemeral_message } => ephemeral_message.as_str(),
+        })
+        .filter(|s| !s.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 /// Default `ProtoJSON` dialect used by Antigravity and generic harnesses.
 pub(crate) struct ProtoJsonDialect;
 
@@ -88,37 +124,48 @@ impl HookDialect for ProtoJsonDialect {
                 name: name.to_owned(),
                 args,
             });
-            if parsed.common.workspace_paths.is_empty()
-                && let Some(cwd) = val.get("cwd").and_then(serde_json::Value::as_str)
-            {
-                parsed.common = CommonHookPayload {
-                    workspace_paths: vec![std::path::PathBuf::from(cwd)],
-                    ..parsed.common
-                };
-            }
-            if parsed.common.conversation_id.is_none()
-                && let Some(session_id) = val.get("session_id").and_then(serde_json::Value::as_str)
-            {
-                parsed.common.conversation_id = Some(session_id.to_owned());
-            }
-            if parsed.common.transcript_path.is_none()
-                && let Some(tp) = val
-                    .get("transcript_path")
-                    .and_then(serde_json::Value::as_str)
-            {
-                parsed.common.transcript_path = Some(std::path::PathBuf::from(tp));
-            }
         }
+        normalize_common_from_raw(raw, &mut parsed.common);
+        Ok(parsed)
+    }
+
+    fn parse_pre_invocation(&self, raw: &str) -> Result<PreInvocationInput, serde_json::Error> {
+        let mut parsed: PreInvocationInput = serde_json::from_str(raw)?;
+        normalize_common_from_raw(raw, &mut parsed.common);
+        Ok(parsed)
+    }
+
+    fn parse_stop(&self, raw: &str) -> Result<StopInput, serde_json::Error> {
+        let mut parsed: StopInput = serde_json::from_str(raw)?;
+        normalize_common_from_raw(raw, &mut parsed.common);
+        Ok(parsed)
+    }
+
+    fn parse_session_start(&self, raw: &str) -> Result<SessionStartInput, serde_json::Error> {
+        let mut parsed: SessionStartInput = serde_json::from_str(raw)?;
+        normalize_common_from_raw(raw, &mut parsed.common);
         Ok(parsed)
     }
 }
 
-/// Hook dialect tailored for Claude Code `PreToolUse` format.
+/// Hook dialect tailored for Claude Code hook wire schemas.
 pub(crate) struct ClaudeCodeDialect;
 
 impl HookDialect for ClaudeCodeDialect {
     fn parse_pre_tool_use(&self, raw: &str) -> Result<PreToolUseInput, serde_json::Error> {
         ProtoJsonDialect.parse_pre_tool_use(raw)
+    }
+
+    fn parse_pre_invocation(&self, raw: &str) -> Result<PreInvocationInput, serde_json::Error> {
+        ProtoJsonDialect.parse_pre_invocation(raw)
+    }
+
+    fn parse_stop(&self, raw: &str) -> Result<StopInput, serde_json::Error> {
+        ProtoJsonDialect.parse_stop(raw)
+    }
+
+    fn parse_session_start(&self, raw: &str) -> Result<SessionStartInput, serde_json::Error> {
+        ProtoJsonDialect.parse_session_start(raw)
     }
 
     fn format_pre_tool_use(&self, resp: &PreToolResponse) -> Result<String, serde_json::Error> {
@@ -141,6 +188,41 @@ impl HookDialect for ClaudeCodeDialect {
         }
         serde_json::to_string(&serde_json::json!({
             "hookSpecificOutput": hook_output
+        }))
+    }
+
+    fn format_pre_invocation(
+        &self,
+        resp: &PreInvocationResponse,
+    ) -> Result<String, serde_json::Error> {
+        let ctx = resp
+            .inject_steps
+            .as_deref()
+            .map_or_default(extract_inject_steps_text);
+        if ctx.is_empty() {
+            return Ok("{}".to_owned());
+        }
+        serde_json::to_string(&serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": ctx,
+            }
+        }))
+    }
+
+    fn format_session_start(
+        &self,
+        resp: &SessionStartResponse,
+    ) -> Result<String, serde_json::Error> {
+        let ctx = extract_inject_steps_text(&resp.inject_steps);
+        if ctx.is_empty() {
+            return Ok("{}".to_owned());
+        }
+        serde_json::to_string(&serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": ctx,
+            }
         }))
     }
 }
@@ -183,12 +265,6 @@ pub(crate) fn is_claude_for_context(root: &std::path::Path, claude_payload: bool
     claude_payload || is_claude_harness_for_root(root)
 }
 
-/// Returns the active [`HookDialect`].
-#[must_use]
-pub(crate) fn active_dialect() -> &'static dyn HookDialect {
-    dialect_for(is_claude_harness())
-}
-
 #[must_use]
 fn dialect_for(use_claude: bool) -> &'static dyn HookDialect {
     if use_claude {
@@ -218,16 +294,24 @@ fn read_raw_stdin() -> Option<String> {
 /// payload itself used Claude Code wire fields.
 #[must_use]
 pub(crate) fn read_pre_tool_use_context() -> (PreToolUseInput, bool) {
+    read_stdin_context("PreToolUse", |d, raw| d.parse_pre_tool_use(raw))
+}
+
+#[must_use]
+fn read_stdin_context<T: Default>(
+    label: &str,
+    parse: impl FnOnce(&dyn HookDialect, &str) -> Result<T, serde_json::Error>,
+) -> (T, bool) {
     let Some(raw) = read_raw_stdin() else {
-        return (PreToolUseInput::default(), false);
+        return (T::default(), false);
     };
     let claude_payload = is_claude_payload(&raw);
     let dialect = dialect_for(claude_payload || is_claude_harness());
-    match dialect.parse_pre_tool_use(&raw) {
+    match parse(dialect, &raw) {
         Ok(val) => (val, claude_payload),
         Err(err) => {
-            eprintln!("tkg-hooks: warning: failed to parse PreToolUse stdin payload: {err}");
-            (PreToolUseInput::default(), claude_payload)
+            eprintln!("tkg-hooks: warning: failed to parse {label} stdin payload: {err}");
+            (T::default(), claude_payload)
         },
     }
 }
@@ -262,77 +346,64 @@ pub(crate) fn finalize_pre_tool_use(
     }
 }
 
-/// Reads and deserializes a `PreInvocationInput` payload from `stdin` via the
-/// active [`HookDialect`].
+/// Reads and deserializes a `PreInvocationInput` payload from `stdin` and reports
+/// whether the payload used Claude Code fields.
 #[must_use]
-pub(crate) fn read_pre_invocation_input() -> PreInvocationInput {
-    let Some(raw) = read_raw_stdin() else {
-        return PreInvocationInput::default();
-    };
-    match active_dialect().parse_pre_invocation(&raw) {
-        Ok(val) => val,
-        Err(err) => {
-            eprintln!("tkg-hooks: warning: failed to parse PreInvocation stdin payload: {err}");
-            PreInvocationInput::default()
-        },
-    }
+pub(crate) fn read_pre_invocation_context() -> (PreInvocationInput, bool) {
+    read_stdin_context("PreInvocation", |d, raw| d.parse_pre_invocation(raw))
 }
 
-/// Emits a `PreInvocationResponse` to `stdout` via the active [`HookDialect`].
-pub(crate) fn write_pre_invocation_response(resp: &PreInvocationResponse) {
-    if let Ok(json) = active_dialect().format_pre_invocation(resp) {
+/// Emits a `PreInvocationResponse` to `stdout` in the resolved harness dialect.
+pub(crate) fn write_pre_invocation_for_context(
+    resp: &PreInvocationResponse,
+    root: &std::path::Path,
+    claude_payload: bool,
+) {
+    let dialect = dialect_for(is_claude_for_context(root, claude_payload));
+    if let Ok(json) = dialect.format_pre_invocation(resp) {
         println!("{json}");
     }
 }
 
-/// Reads and deserializes a `StopInput` payload from `stdin` via the active
-/// [`HookDialect`].
+/// Reads and deserializes a `StopInput` payload from `stdin` and reports whether
+/// the payload used Claude Code fields.
 #[must_use]
-pub(crate) fn read_stop_input() -> StopInput {
-    let Some(raw) = read_raw_stdin() else {
-        return StopInput::default();
-    };
-    match active_dialect().parse_stop(&raw) {
-        Ok(val) => val,
-        Err(err) => {
-            eprintln!("tkg-hooks: warning: failed to parse Stop stdin payload: {err}");
-            StopInput::default()
-        },
-    }
+pub(crate) fn read_stop_context() -> (StopInput, bool) {
+    read_stdin_context("Stop", |d, raw| d.parse_stop(raw))
 }
 
-/// Emits a `StopResponse` to `stdout` via the active [`HookDialect`].
-pub(crate) fn write_stop_response(resp: &StopResponse) {
-    if let Ok(json) = active_dialect().format_stop(resp) {
+/// Emits a `StopResponse` to `stdout` in the resolved harness dialect.
+pub(crate) fn write_stop_for_context(
+    resp: &StopResponse,
+    root: &std::path::Path,
+    claude_payload: bool,
+) {
+    let dialect = dialect_for(is_claude_for_context(root, claude_payload));
+    if let Ok(json) = dialect.format_stop(resp) {
         println!("{json}");
     }
 }
 
-/// Reads and deserializes a `SessionStartInput` payload from `stdin` via the
-/// active [`HookDialect`].
+/// Reads and deserializes a `SessionStartInput` payload from `stdin` and reports
+/// whether the payload used Claude Code fields.
 #[must_use]
-pub(crate) fn read_session_start_input() -> SessionStartInput {
-    let Some(raw) = read_raw_stdin() else {
-        return SessionStartInput::default();
-    };
-    match active_dialect().parse_session_start(&raw) {
-        Ok(val) => val,
-        Err(err) => {
-            eprintln!("tkg-hooks: warning: failed to parse SessionStart stdin payload: {err}");
-            SessionStartInput::default()
-        },
-    }
+pub(crate) fn read_session_start_context() -> (SessionStartInput, bool) {
+    read_stdin_context("SessionStart", |d, raw| d.parse_session_start(raw))
 }
 
-/// Emits a `SessionStartResponse` to `stdout` via the active [`HookDialect`].
-pub(crate) fn write_session_start_response(resp: &SessionStartResponse) {
-    if let Ok(json) = active_dialect().format_session_start(resp) {
+/// Emits a `SessionStartResponse` to `stdout` in the resolved harness dialect.
+pub(crate) fn write_session_start_for_context(
+    resp: &SessionStartResponse,
+    root: &std::path::Path,
+    claude_payload: bool,
+) {
+    let dialect = dialect_for(is_claude_for_context(root, claude_payload));
+    if let Ok(json) = dialect.format_session_start(resp) {
         println!("{json}");
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 
@@ -347,7 +418,9 @@ mod tests {
             "cwd": "/tmp/ws"
         }"#;
         assert!(is_claude_payload(raw));
-        let parsed = active_dialect().parse_pre_tool_use(raw).unwrap();
+        let parsed = dialect_for(is_claude_payload(raw))
+            .parse_pre_tool_use(raw)
+            .unwrap();
         let tc = parsed.tool_call.unwrap();
         assert_eq!(tc.name, "Write");
         assert_eq!(

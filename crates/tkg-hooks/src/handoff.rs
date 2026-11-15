@@ -6,7 +6,8 @@ use std::{fmt::Write, path::Path, process::Command};
 use tkg_common::{InjectStep, SessionStartResponse, StopResponse};
 
 use crate::stdin::{
-    read_session_start_input, read_stop_input, write_session_start_response, write_stop_response,
+    read_session_start_context, read_stop_context, write_session_start_for_context,
+    write_stop_for_context,
 };
 
 /// Executes the `record-handoff` hook (`Stop`).
@@ -16,21 +17,21 @@ use crate::stdin::{
 /// `.tkg/state/handoff.json`. Emits `{}` on `stdout` permitting loop
 /// termination.
 pub(crate) fn execute_record_handoff() -> std::process::ExitCode {
-    let input = read_stop_input();
+    let (input, claude_payload) = read_stop_context();
 
     let root = input.common.resolve_workspace_root();
     let config = match crate::config::HooksConfig::try_load(&root) {
         Ok(cfg) => cfg,
         Err(err) => {
             eprintln!("tkg-hooks: {err}");
-            write_stop_response(&StopResponse::allow());
+            write_stop_for_context(&StopResponse::allow(), &root, claude_payload);
             return std::process::ExitCode::FAILURE;
         },
     };
 
     if !config.stop.enabled || !config.stop.record_handoff {
         let resp = StopResponse::allow();
-        write_stop_response(&resp);
+        write_stop_for_context(&resp, &root, claude_payload);
         return std::process::ExitCode::SUCCESS;
     }
 
@@ -52,7 +53,7 @@ pub(crate) fn execute_record_handoff() -> std::process::ExitCode {
     }
 
     let resp = StopResponse::allow();
-    write_stop_response(&resp);
+    write_stop_for_context(&resp, &root, claude_payload);
     std::process::ExitCode::SUCCESS
 }
 
@@ -147,21 +148,25 @@ fn evaluate_custom_injections(
 }
 
 pub(crate) fn execute_inject_wake() -> std::process::ExitCode {
-    let input = read_session_start_input();
+    let (input, claude_payload) = read_session_start_context();
 
     let root = input.common.resolve_workspace_root();
     let config = match crate::config::HooksConfig::try_load(&root) {
         Ok(cfg) => cfg,
         Err(err) => {
             eprintln!("tkg-hooks: {err}");
-            write_session_start_response(&SessionStartResponse::default());
+            write_session_start_for_context(
+                &SessionStartResponse::default(),
+                &root,
+                claude_payload,
+            );
             return std::process::ExitCode::FAILURE;
         },
     };
 
     if !config.session_start.enabled {
         let resp = SessionStartResponse::default();
-        write_session_start_response(&resp);
+        write_session_start_for_context(&resp, &root, claude_payload);
         return std::process::ExitCode::SUCCESS;
     }
 
@@ -181,12 +186,11 @@ pub(crate) fn execute_inject_wake() -> std::process::ExitCode {
         &mut resp.inject_steps,
     );
 
-    write_session_start_response(&resp);
+    write_session_start_for_context(&resp, &root, claude_payload);
     std::process::ExitCode::SUCCESS
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 

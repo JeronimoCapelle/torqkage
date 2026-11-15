@@ -60,7 +60,7 @@ pub(crate) fn take_vcs_snapshot(workspace_root: &Path, message: &str) -> String 
 }
 
 fn resolve_plugin_directory(workspace_root: &Path) -> Option<std::path::PathBuf> {
-    let local = workspace_root.join("plugins/torqkage");
+    let local = workspace_root.join(tkg_common::harness::local_plugin_rel_dir());
     if local.is_dir() {
         return Some(local);
     }
@@ -111,7 +111,9 @@ pub(crate) fn validate_declarative_contracts(workspace_root: &Path) -> Result<St
     // 4. Validate hooks.toml if present
     let tkg_hooks = workspace_root.join(".tkg/hooks.toml");
     let hooks_path = workspace_root.join("hooks.toml");
-    let plugin_hooks = workspace_root.join("plugins/torqkage/hooks.toml");
+    let plugin_hooks = workspace_root
+        .join(tkg_common::harness::local_plugin_rel_dir())
+        .join("hooks.toml");
     if tkg_hooks.is_file() || hooks_path.is_file() || plugin_hooks.is_file() {
         report.push_str("✔ hooks.toml: Lifecycle hook policies verified\n");
     }

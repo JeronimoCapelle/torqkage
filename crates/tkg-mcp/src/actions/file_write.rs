@@ -107,14 +107,7 @@ pub(crate) fn execute(
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    clippy::assertions_on_result_states,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use serde_json::json;
 

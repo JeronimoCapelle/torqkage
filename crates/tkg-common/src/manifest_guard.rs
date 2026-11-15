@@ -79,10 +79,8 @@ pub fn check_manifest_protection(
         if g.allowed_files.iter().any(|f| f == file_name || f == "*") {
             return Ok(());
         }
-        if let Some(name) = agent_name
-            && name != "coder"
-            && !g.allowed_files.iter().any(|f| f == file_name)
-        {
+        let name = agent_name.unwrap_or("unknown");
+        if !g.allowed_files.iter().any(|f| f == file_name) {
             return Err(format!(
                 "Manifest protection violation: Agent '{name}' is not authorized to mutate build manifest '{file_name}'"
             ));
@@ -95,10 +93,9 @@ pub fn check_manifest_protection(
 /// Fallback heuristic verifying if a tool name implies mutation semantics.
 #[must_use]
 pub fn is_default_fallback_mutation_tool(name: &str) -> bool {
-    let bytes = name.as_bytes();
     if matches!(
-        bytes,
-        b"file_write" | b"write_file" | b"mpatch_edit" | b"modify_code" | b"edit_file"
+        name,
+        "file_write" | "write_file" | "mpatch_edit" | "modify_code" | "edit_file"
     ) {
         return true;
     }
@@ -160,7 +157,6 @@ pub fn extract_candidate_paths(args: &serde_json::Value) -> Vec<String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use serde_json::json;
 
@@ -206,6 +202,9 @@ mod tests {
         let err = check_manifest_protection(cargo_toml, Some("reviewer"), Some(&guard));
         assert!(err.is_err());
         assert!(err.unwrap_err().contains("Manifest protection violation"));
+
+        // "coder" is governed uniformly by its guard just like any other agent
+        assert!(check_manifest_protection(cargo_toml, Some("coder"), Some(&guard)).is_err());
 
         // Manifest file with explicit allowance: allowed
         let allowed_guard = AgentGuard {

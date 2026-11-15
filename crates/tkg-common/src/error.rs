@@ -44,17 +44,17 @@ fn compute_line_col(content: &str, byte_offset: usize) -> (usize, usize, &str) {
 
     for (idx, raw_line) in content.split('\n').enumerate() {
         let clean_line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-        let line_end = byte_pos.saturating_add(raw_line.len());
-        let line_no = idx.saturating_add(1);
+        let line_end = byte_pos + raw_line.len();
+        let line_no = idx + 1;
         let col_no = content
             .get(byte_pos..clamped.min(line_end))
-            .map_or(1, |slice| slice.chars().count().saturating_add(1));
+            .map_or(1, |slice| slice.chars().count() + 1);
         last_match = (line_no, col_no, clean_line);
         if clamped <= line_end {
             return last_match;
         }
         // Account for the '\n' delimiter
-        byte_pos = line_end.saturating_add(1);
+        byte_pos = line_end + 1;
     }
 
     last_match

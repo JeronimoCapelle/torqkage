@@ -480,7 +480,7 @@ pub fn strip_comments_with_syntax(input: &str, syntax: &SyntaxConfig) -> String 
 
         // 5. Normal character
         out.push(ch);
-        i = i.saturating_add(ch.len_utf8());
+        i += ch.len_utf8();
     }
 
     out
@@ -498,28 +498,28 @@ fn try_consume_block_comment(
         let start_seq = block.start.as_str();
         let end_seq = block.end.as_str();
         if !start_seq.is_empty() && !end_seq.is_empty() && rest.starts_with(start_seq) {
-            let mut i = start.saturating_add(start_seq.len());
+            let mut i = start + start_seq.len();
 
             if start_seq == end_seq {
                 if let Some(end_offset) = input.get(i..).and_then(|s| s.find(end_seq)) {
-                    i = i.saturating_add(end_offset).saturating_add(end_seq.len());
+                    i += end_offset + end_seq.len();
                 } else {
                     i = len;
                 }
             } else {
                 let mut depth = 1_usize;
-                while i < len && depth > 0_usize {
+                while i < len && depth > 0 {
                     let Some(sub) = input.get(i..) else {
                         break;
                     };
                     if sub.starts_with(start_seq) {
-                        depth = depth.saturating_add(1_usize);
-                        i = i.saturating_add(start_seq.len());
+                        depth += 1;
+                        i += start_seq.len();
                     } else if sub.starts_with(end_seq) {
-                        depth = depth.saturating_sub(1_usize);
-                        i = i.saturating_add(end_seq.len());
+                        depth -= 1;
+                        i += end_seq.len();
                     } else if let Some(ch) = sub.chars().next() {
-                        i = i.saturating_add(ch.len_utf8());
+                        i += ch.len_utf8();
                     } else {
                         break;
                     }
@@ -539,11 +539,11 @@ fn try_consume_line_comment(input: &str, start: usize, line_comments: &[String])
 
     for lc_seq in line_comments {
         if !lc_seq.is_empty() && rest.starts_with(lc_seq.as_str()) {
-            let i = start.saturating_add(lc_seq.len());
+            let i = start + lc_seq.len();
             let next_i = input
                 .get(i..)
                 .and_then(|s| s.find('\n'))
-                .map_or(len, |nl_offset| i.saturating_add(nl_offset));
+                .map_or(len, |nl_offset| i + nl_offset);
             return Some(next_i);
         }
     }
@@ -559,18 +559,18 @@ fn consume_quoted_string(
     out: &mut String,
 ) -> usize {
     out.push(quote);
-    let mut i = start.saturating_add(quote.len_utf8());
+    let mut i = start + quote.len_utf8();
 
     while i < len {
         let Some(sc) = input.get(i..).and_then(|s| s.chars().next()) else {
             break;
         };
         out.push(sc);
-        i = i.saturating_add(sc.len_utf8());
+        i += sc.len_utf8();
         if sc == '\\' {
             if let Some(escaped) = input.get(i..).and_then(|s| s.chars().next()) {
                 out.push(escaped);
-                i = i.saturating_add(escaped.len_utf8());
+                i += escaped.len_utf8();
             }
         } else if sc == quote {
             break;
@@ -588,39 +588,39 @@ fn try_consume_raw_string(input: &str, start: usize) -> Option<(&str, usize)> {
     let mut i = start;
 
     if bytes.get(i).is_some_and(|&b| b == b'b' || b == b'c') {
-        i = i.saturating_add(1_usize);
+        i += 1;
     }
 
     if bytes.get(i) != Some(&b'r') {
         return None;
     }
-    i = i.saturating_add(1_usize);
+    i += 1;
 
     let mut hash_count = 0_usize;
     while bytes.get(i) == Some(&b'#') {
-        hash_count = hash_count.saturating_add(1_usize);
-        i = i.saturating_add(1_usize);
+        hash_count += 1;
+        i += 1;
     }
 
     if bytes.get(i) != Some(&b'"') {
         return None;
     }
-    i = i.saturating_add(1_usize);
+    i += 1;
 
     while i < len {
         if bytes.get(i) == Some(&b'"') {
             let mut matched_hashes = 0_usize;
-            let mut check_idx = i.saturating_add(1_usize);
+            let mut check_idx = i + 1;
             while matched_hashes < hash_count && bytes.get(check_idx) == Some(&b'#') {
-                matched_hashes = matched_hashes.saturating_add(1_usize);
-                check_idx = check_idx.saturating_add(1_usize);
+                matched_hashes += 1;
+                check_idx += 1;
             }
             if matched_hashes == hash_count {
                 return input.get(start..check_idx).map(|lit| (lit, check_idx));
             }
         }
         if let Some(ch) = input.get(i..).and_then(|s| s.chars().next()) {
-            i = i.saturating_add(ch.len_utf8());
+            i += ch.len_utf8();
         } else {
             break;
         }
@@ -814,35 +814,35 @@ fn parse_rust_attribute<'a>(
     }
 
     let start = *i;
-    *i = i.saturating_add(2_usize);
+    *i += 2;
     let content_start = *i;
     let mut content_end = *i;
     let mut bracket_depth = 1_usize;
 
-    while *i < len && bracket_depth > 0_usize {
+    while *i < len && bracket_depth > 0 {
         let Some(ch) = input.get(*i..).and_then(|s| s.chars().next()) else {
             break;
         };
         if ch == '[' {
-            bracket_depth = bracket_depth.saturating_add(1_usize);
-            *i = i.saturating_add(1_usize);
+            bracket_depth += 1;
+            *i += 1;
             content_end = *i;
         } else if ch == ']' {
-            bracket_depth = bracket_depth.saturating_sub(1_usize);
-            if bracket_depth > 0_usize {
-                content_end = i.saturating_add(1_usize);
+            bracket_depth -= 1;
+            if bracket_depth > 0 {
+                content_end = *i + 1;
             }
-            *i = i.saturating_add(1_usize);
+            *i += 1;
         } else if ch == '"' {
-            *i = i.saturating_add(1_usize);
+            *i += 1;
             while *i < len {
                 let Some(sc) = input.get(*i..).and_then(|s| s.chars().next()) else {
                     break;
                 };
-                *i = i.saturating_add(sc.len_utf8());
+                *i += sc.len_utf8();
                 if sc == '\\' {
                     if let Some(esc) = input.get(*i..).and_then(|s| s.chars().next()) {
-                        *i = i.saturating_add(esc.len_utf8());
+                        *i += esc.len_utf8();
                     }
                 } else if sc == '"' {
                     break;
@@ -850,7 +850,7 @@ fn parse_rust_attribute<'a>(
             }
             content_end = *i;
         } else {
-            *i = i.saturating_add(ch.len_utf8());
+            *i += ch.len_utf8();
             content_end = *i;
         }
     }
@@ -893,15 +893,15 @@ fn skip_test_item_body(input: &str, i: &mut usize) {
         };
 
         if ch == '"' {
-            *i = i.saturating_add(1_usize);
+            *i += 1;
             while *i < len {
                 let Some(sc) = input.get(*i..).and_then(|s| s.chars().next()) else {
                     break;
                 };
-                *i = i.saturating_add(sc.len_utf8());
+                *i += sc.len_utf8();
                 if sc == '\\' {
                     if let Some(esc) = input.get(*i..).and_then(|s| s.chars().next()) {
-                        *i = i.saturating_add(esc.len_utf8());
+                        *i += esc.len_utf8();
                     }
                 } else if sc == '"' {
                     break;
@@ -916,31 +916,31 @@ fn skip_test_item_body(input: &str, i: &mut usize) {
             let mut chars = sub.chars();
             _ = chars.next();
             if let (Some(mid), Some('\'')) = (chars.next(), chars.next()) {
-                *i = i.saturating_add(2_usize).saturating_add(mid.len_utf8());
+                *i += 2 + mid.len_utf8();
                 continue;
             }
         }
 
         if ch == '{' {
             seen_brace = true;
-            brace_depth = brace_depth.saturating_add(1_usize);
-            *i = i.saturating_add(1_usize);
+            brace_depth += 1;
+            *i += 1;
         } else if ch == '}' {
-            if brace_depth > 0_usize {
-                brace_depth = brace_depth.saturating_sub(1_usize);
-                *i = i.saturating_add(1_usize);
-                if brace_depth == 0_usize {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+                *i += 1;
+                if brace_depth == 0 {
                     break;
                 }
             } else {
-                *i = i.saturating_add(1_usize);
+                *i += 1;
                 break;
             }
         } else if ch == ';' && !seen_brace {
-            *i = i.saturating_add(1_usize);
+            *i += 1;
             break;
         } else {
-            *i = i.saturating_add(ch.len_utf8());
+            *i += ch.len_utf8();
         }
     }
 }
@@ -961,7 +961,7 @@ fn strip_brace_test_items(input: &str, syntax: &SyntaxConfig) -> String {
             if attr_buffer.is_empty() {
                 out.push(ch);
             }
-            i = i.saturating_add(ch.len_utf8());
+            i += ch.len_utf8();
             continue;
         }
 
@@ -995,7 +995,7 @@ fn strip_brace_test_items(input: &str, syntax: &SyntaxConfig) -> String {
         }
 
         out.push(ch);
-        i = i.saturating_add(ch.len_utf8());
+        i += ch.len_utf8();
     }
 
     for (attr, is_test) in attr_buffer {
@@ -1249,15 +1249,7 @@ pub fn check_agent_path_policies_direct(
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::needless_raw_strings,
-    clippy::assertions_on_result_states,
-    clippy::indexing_slicing,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 

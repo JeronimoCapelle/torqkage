@@ -178,6 +178,29 @@ impl SessionProvider for OpenCodeSessionProvider {
     }
 }
 
+/// Claude Code session provider reading `~/.claude/projects/<encoded-cwd>/*.jsonl`
+/// transcripts with fallback to `.tkg/state/sessions`.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct ClaudeSessionProvider;
+
+impl SessionProvider for ClaudeSessionProvider {
+    fn find_agent_session(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Option<SessionSummary> {
+        if let Ok(home) = std::env::var("HOME") {
+            let projects_dir = PathBuf::from(home).join(".claude").join("projects");
+            if let Some(sess) =
+                discover_claude_session_in(&projects_dir, agent_name, workspace_root)
+            {
+                return Some(sess);
+            }
+        }
+        discover_generic_state_session(agent_name, workspace_root)
+    }
+}
+
 /// Generic state session provider reading `.tkg/state/sessions`.
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct GenericSessionProvider;
@@ -274,6 +297,201 @@ fn discover_generic_state_session(
 ) -> Option<SessionSummary> {
     let dirs = [workspace_root.join(".tkg/state/sessions")];
     discover_json_session_in_dirs(&dirs, agent_name)
+}
+
+fn encode_claude_project_slug(path: &Path, normalize_punct: bool) -> String {
+    let raw = path.to_string_lossy();
+    raw.chars()
+        .map(|c| {
+            if c == '/' || c == '\\' || (normalize_punct && (c == '.' || c == '_')) {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+fn extract_claude_message_text(val: &serde_json::Value) -> Option<String> {
+    let content = val.get("message").and_then(|m| m.get("content"))?;
+    if let Some(s) = content.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.chars().take(80).collect());
+        }
+    }
+    if let Some(arr) = content.as_array() {
+        for item in arr {
+            if let Some(text) = item.get("text").and_then(serde_json::Value::as_str) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.chars().take(80).collect());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_claude_jsonl_session(
+    path: &Path,
+    agent_name: &str,
+    canonical_ws: &Path,
+    raw_ws: &Path,
+) -> Option<SessionSummary> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut session_id: Option<String> = None;
+    let mut last_timestamp: Option<String> = None;
+    let mut declared_agent: Option<String> = None;
+    let mut summary_preview: Option<String> = None;
+    let mut user_preview: Option<String> = None;
+    let mut step_count: u64 = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+
+        if let Some(cwd_str) = val.get("cwd").and_then(serde_json::Value::as_str) {
+            let cwd_path = Path::new(cwd_str);
+            let cwd_canon = cwd_path
+                .canonicalize()
+                .unwrap_or_else(|_| cwd_path.to_path_buf());
+            if cwd_canon != canonical_ws && cwd_path != raw_ws {
+                return None;
+            }
+        }
+
+        if let Some(sid) = val
+            .get("sessionId")
+            .or_else(|| val.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        {
+            session_id = Some(sid.to_owned());
+        }
+
+        if let Some(da) = val
+            .get("agent")
+            .or_else(|| val.get("agent_name"))
+            .or_else(|| val.get("agentName"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        {
+            declared_agent = Some(da.to_owned());
+        }
+
+        if let Some(ts) = val
+            .get("timestamp")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        {
+            last_timestamp = Some(ts.to_owned());
+        }
+
+        let entry_type = val.get("type").and_then(serde_json::Value::as_str);
+        if entry_type == Some("summary") {
+            if let Some(s) = val
+                .get("summary")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                summary_preview = Some(s.chars().take(80).collect());
+            }
+        } else if matches!(entry_type, Some("user" | "assistant")) {
+            step_count += 1;
+            if entry_type == Some("user") && user_preview.is_none() {
+                user_preview = extract_claude_message_text(&val);
+            }
+        }
+    }
+
+    if step_count == 0 {
+        return None;
+    }
+
+    if let Some(da) = declared_agent
+        && !da.eq_ignore_ascii_case(agent_name)
+    {
+        return None;
+    }
+
+    let conversation_id = session_id.unwrap_or_else(|| {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_owned()
+    });
+
+    let last_modified_time = last_timestamp.unwrap_or_else(|| {
+        path.metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .map_or_else(
+                || "1970-01-01T00:00:00Z".to_owned(),
+                |t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                        .to_string()
+                },
+            )
+    });
+
+    Some(SessionSummary {
+        conversation_id,
+        agent_name: agent_name.to_owned(),
+        workspace_uris: canonical_ws.to_string_lossy().into_owned(),
+        last_modified_time,
+        step_count,
+        preview: summary_preview.or(user_preview).unwrap_or_default(),
+    })
+}
+
+pub(crate) fn discover_claude_session_in(
+    projects_dir: &Path,
+    agent_name: &str,
+    workspace_root: &Path,
+) -> Option<SessionSummary> {
+    if !projects_dir.is_dir() {
+        return None;
+    }
+    let canonical = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let mut candidate_dirs = Vec::new();
+    for base in [&canonical, workspace_root] {
+        for normalize_punct in [false, true] {
+            let dir = projects_dir.join(encode_claude_project_slug(base, normalize_punct));
+            if dir.is_dir() && !candidate_dirs.contains(&dir) {
+                candidate_dirs.push(dir);
+            }
+        }
+    }
+
+    let mut sessions = Vec::new();
+    for dir in candidate_dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "jsonl")
+                && let Some(sess) =
+                    parse_claude_jsonl_session(&path, agent_name, &canonical, workspace_root)
+            {
+                sessions.push(sess);
+            }
+        }
+    }
+
+    sessions.sort_by(|a, b| b.last_modified_time.cmp(&a.last_modified_time));
+    sessions.into_iter().next()
 }
 
 fn parse_json_session(
@@ -431,7 +649,6 @@ pub(crate) fn query_session_from_sources(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 
@@ -502,7 +719,7 @@ mod tests {
         assert_eq!(session.conversation_id, "test-uuid-1234");
         assert_eq!(session.step_count, 5);
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -574,7 +791,7 @@ mod tests {
             query_session_from_sources(&db_path, &convs_dir, &history_path, "copilot", &other_ws);
         assert!(res_none.is_none());
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -629,7 +846,7 @@ mod tests {
             query_session_from_sources(&db_path, &convs_dir, &history_path, "copilot", &mock_ws);
         assert!(res.is_none());
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -695,7 +912,7 @@ mod tests {
         assert_eq!(session.conversation_id, "sub-uuid-7777");
         assert_eq!(session.step_count, 12);
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -741,7 +958,7 @@ mod tests {
         let diff_res = provider.find_agent_session("reviewer", &mock_ws);
         assert!(diff_res.is_none());
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -779,6 +996,57 @@ mod tests {
         assert_eq!(sess.step_count, 5);
         assert_eq!(sess.preview, "Architecture roadmap review");
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_claude_session_discovery() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tkg-ctrl-test-claude-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mock_ws = temp_dir.join("ws.project");
+        let projects_dir = temp_dir.join("projects");
+        std::fs::create_dir_all(&mock_ws).unwrap();
+        let slug = encode_claude_project_slug(&mock_ws.canonicalize().unwrap(), true);
+        let project_sessions = projects_dir.join(slug);
+        std::fs::create_dir_all(&project_sessions).unwrap();
+
+        let lines = [
+            serde_json::json!({
+                "type": "user",
+                "sessionId": "claude-ses-42",
+                "cwd": mock_ws,
+                "timestamp": "2026-11-15T10:00:00Z",
+                "message": { "role": "user", "content": "Refactor harness detection" }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "assistant",
+                "sessionId": "claude-ses-42",
+                "cwd": mock_ws,
+                "timestamp": "2026-11-15T10:05:00Z",
+                "message": { "role": "assistant", "content": [{ "type": "text", "text": "Done" }] }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "summary",
+                "summary": "Harness detection refactored"
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        std::fs::write(project_sessions.join("claude-ses-42.jsonl"), lines).unwrap();
+
+        let sess = discover_claude_session_in(&projects_dir, "coder", &mock_ws).unwrap();
+        assert_eq!(sess.conversation_id, "claude-ses-42");
+        assert_eq!(sess.step_count, 2);
+        assert_eq!(sess.last_modified_time, "2026-11-15T10:05:00Z");
+        assert_eq!(sess.preview, "Harness detection refactored");
+
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

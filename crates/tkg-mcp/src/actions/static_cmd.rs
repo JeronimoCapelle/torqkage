@@ -43,12 +43,6 @@ pub(crate) fn execute(
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
     use crate::models::OutputCapture;

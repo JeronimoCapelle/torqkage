@@ -21,6 +21,28 @@ use crate::project::{ProjectConfig, ProjectRunnerConfig};
 /// Plugin bundle directory name used under every harness plugin root.
 pub const BUNDLE_NAME: &str = "torqkage";
 
+/// Workspace-relative directory containing the bundled plugin assets.
+#[must_use]
+pub fn local_plugin_rel_dir() -> PathBuf {
+    PathBuf::from("plugins").join(BUNDLE_NAME)
+}
+
+/// Infers an execution harness identifier from environment variables or
+/// harness-specific workspace directories (`.claude`, `.opencode`, `.gemini`).
+#[must_use]
+pub fn detect_workspace_harness(workspace_root: &Path) -> Option<&'static str> {
+    if std::env::var_os("CLAUDE_PROJECT_DIR").is_some() || workspace_root.join(".claude").is_dir() {
+        return Some("claude");
+    }
+    if workspace_root.join(".opencode").is_dir() {
+        return Some("opencode");
+    }
+    if workspace_root.join(".gemini").is_dir() {
+        return Some("agy");
+    }
+    None
+}
+
 /// Static description of an agent execution harness.
 pub trait Harness: Send + Sync + std::fmt::Debug {
     /// Canonical lowercase identifier (`agy`, `opencode`, `claude`, or the
@@ -455,5 +477,28 @@ mod tests {
         for (got, want) in c.iter().zip(expected) {
             assert_eq!(got, &PathBuf::from(want));
         }
+    }
+
+    #[test]
+    fn test_detect_workspace_harness() {
+        let base = std::env::temp_dir().join(format!(
+            "tkg_test_detect_harness_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let claude_ws = base.join("claude_ws");
+        std::fs::create_dir_all(claude_ws.join(".claude")).ok();
+        assert_eq!(detect_workspace_harness(&claude_ws), Some("claude"));
+
+        let opencode_ws = base.join("opencode_ws");
+        std::fs::create_dir_all(opencode_ws.join(".opencode")).ok();
+        assert_eq!(detect_workspace_harness(&opencode_ws), Some("opencode"));
+
+        let empty_ws = base.join("empty_ws");
+        std::fs::create_dir_all(&empty_ws).ok();
+        assert_eq!(detect_workspace_harness(&empty_ws), None);
+
+        _ = std::fs::remove_dir_all(&base);
     }
 }

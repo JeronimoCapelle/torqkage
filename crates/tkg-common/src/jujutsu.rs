@@ -940,12 +940,6 @@ fn is_jj_in_path() -> bool {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
 
@@ -958,14 +952,14 @@ mod tests {
             .unwrap()
             .to_path_buf();
         if JujutsuWorkspace::is_jj_repo(&root) {
-            let _clean = JujutsuWorkspace::is_workspace_clean(&root);
+            _ = JujutsuWorkspace::is_workspace_clean(&root);
         }
 
         let temp_dir = std::env::temp_dir().join(format!("tkg_jj_test_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join(".jj")).expect("create temp .jj dir");
         assert!(JujutsuWorkspace::is_jj_repo(&temp_dir));
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

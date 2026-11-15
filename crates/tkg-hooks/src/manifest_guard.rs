@@ -60,7 +60,6 @@ pub(crate) fn evaluate_manifest_guard(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use serde_json::json;
     use tkg_common::{HookDecision, ToolCallPayload};

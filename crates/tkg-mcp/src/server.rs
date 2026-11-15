@@ -55,9 +55,7 @@ impl McpServer {
         let project = tkg_common::ProjectConfig::detect_or_load(&workspace_root);
         let mut enriched_tools = tools;
         for t in &mut enriched_tools {
-            let is_doc_tool = t.category.as_deref() == Some("documentation")
-                || project.docs.tool_name.as_deref() == Some(&t.name);
-            if is_doc_tool && !project.docs.paths.is_empty() {
+            if t.is_documentation_tool(&project) && !project.docs.paths.is_empty() {
                 t.description = format!(
                     "Searches project documentation and specifications across [{}] for grep-ready specs, opcodes, and ABI definitions",
                     project.docs.paths.join(", ")
@@ -467,13 +465,7 @@ fn handle_notification(req: &JsonRpcRequest) {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use super::*;
     use crate::models::ToolAction;
@@ -582,7 +574,7 @@ mod tests {
                 .contains("Hello from file_read")
         );
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -642,7 +634,7 @@ mod tests {
         let final_content = std::fs::read_to_string(temp_dir.join("test.rs")).unwrap();
         assert!(final_content.contains("42"));
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -712,7 +704,7 @@ mod tests {
                 .contains("unauthorized for agent 'restricted_agent'")
         );
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -762,7 +754,7 @@ mod tests {
             .clone();
         assert_eq!(tool_list.len(), 2);
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

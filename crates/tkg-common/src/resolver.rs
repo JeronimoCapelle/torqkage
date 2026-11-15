@@ -125,12 +125,6 @@ impl WorkspaceResolver {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
 
@@ -162,7 +156,7 @@ mod tests {
         let resolved = WorkspaceResolver::find_root(Some(&sub_ws)).unwrap();
         assert_eq!(resolved, main_repo.canonicalize().unwrap());
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

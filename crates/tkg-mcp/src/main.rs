@@ -89,18 +89,18 @@ fn resolve_workspace_and_config() -> (PathBuf, PathBuf, Option<String>) {
     while i < args.len() {
         if let Some(arg) = args.get(i) {
             if (arg == "--config" || arg == "-c")
-                && let Some(val) = args.get(i.saturating_add(1))
+                && let Some(val) = args.get(i + 1)
             {
                 custom_config = Some(PathBuf::from(val));
-                i = i.saturating_add(1);
+                i += 1;
             } else if (arg == "--workspace" || arg == "-w")
-                && let Some(val) = args.get(i.saturating_add(1))
+                && let Some(val) = args.get(i + 1)
             {
                 custom_workspace = Some(PathBuf::from(val));
-                i = i.saturating_add(1);
+                i += 1;
             }
         }
-        i = i.saturating_add(1);
+        i += 1;
     }
 
     let workspace_root = custom_workspace.unwrap_or_else(|| {

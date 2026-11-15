@@ -64,7 +64,7 @@ fn validate_path_arg(
 
     if is_path_arg {
         if tool.enforce_workspace_bounds() {
-            let _safe_path = crate::guards::resolve_safe_path(
+            _ = crate::guards::resolve_safe_path(
                 workspace_root,
                 val,
                 &tool.allowed_directories,
@@ -235,14 +235,7 @@ pub(crate) fn matches_pattern(val: &str, pattern: &str) -> bool {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    clippy::assertions_on_result_states,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use serde_json::json;
 
@@ -707,7 +700,7 @@ mod tests {
                 .contains("escapes canonical workspace root")
         );
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -725,7 +718,7 @@ mod tests {
         assert!(!is_err);
         assert_eq!(out, "RED_ALERT");
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -780,7 +773,7 @@ mod tests {
             "Parameter conflict: Argument 'bin' cannot be used together with 'all_targets'"
         ));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -806,6 +799,6 @@ mod tests {
         let err = execute(&tool, &temp, &args_bad).unwrap_err();
         assert!(err.contains("not one of allowed enum values"));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 }

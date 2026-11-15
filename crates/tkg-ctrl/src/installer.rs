@@ -193,9 +193,7 @@ impl HarnessDriver for ClaudeDriver {
     }
 
     fn session_provider(&self) -> Box<dyn crate::session::SessionProvider> {
-        // TODO(harness): Implement native ClaudeSessionProvider reading
-        // ~/.claude/projects/ JSONL transcripts.
-        Box::new(crate::session::GenericSessionProvider)
+        Box::new(crate::session::ClaudeSessionProvider)
     }
 }
 
@@ -372,19 +370,17 @@ fn ensure_binaries_executable(dest_bin: &Path) {
 /// `<workspace>/plugins/torqkage` or directly in `<workspace>` if executed
 /// inside an extracted plugin release bundle.
 fn resolve_source_plugin(workspace_root: &Path) -> Result<PathBuf, String> {
-    if workspace_root
-        .join("plugins/torqkage/plugin.json")
-        .is_file()
-    {
-        Ok(workspace_root.join("plugins/torqkage"))
+    let local_plugin_dir = workspace_root.join(tkg_common::harness::local_plugin_rel_dir());
+    if local_plugin_dir.join("plugin.json").is_file() {
+        Ok(local_plugin_dir)
     } else if workspace_root.join("plugin.json").is_file() {
         Ok(workspace_root.to_path_buf())
-    } else if workspace_root.join("plugins/torqkage").is_dir() {
-        Ok(workspace_root.join("plugins/torqkage"))
+    } else if local_plugin_dir.is_dir() {
+        Ok(local_plugin_dir)
     } else {
         Err(format!(
             "Source plugin bundle not found at '{}' or '{}'",
-            workspace_root.join("plugins/torqkage").display(),
+            local_plugin_dir.display(),
             workspace_root.display()
         ))
     }
@@ -663,11 +659,6 @@ pub(crate) fn register_custom_mcp_config(workspace_root: &Path) -> Result<String
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
 
@@ -676,9 +667,9 @@ mod tests {
         let temp_base = std::env::temp_dir().join(format!("tkg_copy_test_{}", std::process::id()));
         let src = temp_base.join("src");
         let dst = temp_base.join("dst");
-        drop(std::fs::remove_dir_all(&temp_base));
+        _ = std::fs::remove_dir_all(&temp_base);
 
-        drop(std::fs::create_dir_all(src.join("sub")));
+        _ = std::fs::create_dir_all(src.join("sub"));
         std::fs::write(src.join("a.txt"), "hello a").expect("write a");
         std::fs::write(src.join("sub/b.txt"), "hello b").expect("write b");
 
@@ -691,37 +682,37 @@ mod tests {
             "hello b"
         );
 
-        drop(std::fs::remove_dir_all(&temp_base));
+        _ = std::fs::remove_dir_all(&temp_base);
     }
 
     #[test]
     fn test_resolve_source_plugin() {
         let temp = std::env::temp_dir().join(format!("tkg_src_test_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
 
         // Case 1: unzipped plugin root containing plugin.json directly
-        drop(std::fs::create_dir_all(&temp));
+        _ = std::fs::create_dir_all(&temp);
         std::fs::write(temp.join("plugin.json"), "{}").expect("write plugin.json");
         let resolved = resolve_source_plugin(&temp).expect("resolve directly");
         assert_eq!(resolved, temp);
 
         // Case 2: repo workspace with plugins/torqkage/plugin.json
         let temp_ws = std::env::temp_dir().join(format!("tkg_ws_test_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp_ws));
-        drop(std::fs::create_dir_all(temp_ws.join("plugins/torqkage")));
+        _ = std::fs::remove_dir_all(&temp_ws);
+        _ = std::fs::create_dir_all(temp_ws.join("plugins/torqkage"));
         std::fs::write(temp_ws.join("plugins/torqkage/plugin.json"), "{}").expect("write");
         let resolved_ws = resolve_source_plugin(&temp_ws).expect("resolve in workspace");
         assert_eq!(resolved_ws, temp_ws.join("plugins/torqkage"));
 
-        drop(std::fs::remove_dir_all(&temp));
-        drop(std::fs::remove_dir_all(&temp_ws));
+        _ = std::fs::remove_dir_all(&temp);
+        _ = std::fs::remove_dir_all(&temp_ws);
     }
 
     #[test]
     fn test_register_harness_configs() {
         let temp_ws = std::env::temp_dir().join(format!("tkg_reg_test_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp_ws));
-        drop(std::fs::create_dir_all(&temp_ws));
+        _ = std::fs::remove_dir_all(&temp_ws);
+        _ = std::fs::create_dir_all(&temp_ws);
 
         // 1. OpenCode
         let opencode_res = register_opencode_config(&temp_ws);
@@ -787,14 +778,14 @@ mod tests {
             Some("tkg-mcp")
         );
 
-        drop(std::fs::remove_dir_all(&temp_ws));
+        _ = std::fs::remove_dir_all(&temp_ws);
     }
 
     #[test]
     fn test_register_claude_preserves_existing_keys_and_is_idempotent() {
         let temp_ws =
             std::env::temp_dir().join(format!("tkg_claude_merge_test_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp_ws));
+        _ = std::fs::remove_dir_all(&temp_ws);
         std::fs::create_dir_all(temp_ws.join(".claude")).unwrap();
 
         std::fs::write(
@@ -859,6 +850,6 @@ mod tests {
         let err = register_claude_config(&temp_ws).unwrap_err();
         assert!(err.contains("Failed to parse JSON"));
 
-        drop(std::fs::remove_dir_all(&temp_ws));
+        _ = std::fs::remove_dir_all(&temp_ws);
     }
 }

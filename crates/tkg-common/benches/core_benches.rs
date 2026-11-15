@@ -150,7 +150,7 @@ fn bench_frontmatter_parse_and_serialize() -> String {
     let fm = AgentFrontmatter::parse(black_box(SAMPLE_AGENT_MANIFEST)).unwrap_or_default();
     let agy = Antigravity;
     let oc = OpenCode;
-    drop(fm.serialize_for_harness(black_box(&oc)));
+    _ = fm.serialize_for_harness(black_box(&oc));
     fm.serialize_for_harness(black_box(&agy))
 }
 
@@ -163,7 +163,7 @@ fn bench_resolve_full_tools_toml() -> usize {
 #[divan::bench]
 fn bench_path_glob_and_security_guards() -> bool {
     let p = Path::new("crates/tkg-common/src/content_filter.rs");
-    drop(check_dangerous_files_with_security(black_box(p), None));
+    _ = check_dangerous_files_with_security(black_box(p), None);
     path_matches_pattern(
         black_box("crates/tkg-common/src/content_filter.rs"),
         black_box("crates/**/*.rs"),

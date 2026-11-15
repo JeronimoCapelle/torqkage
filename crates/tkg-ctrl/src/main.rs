@@ -301,8 +301,8 @@ fn run_tui(workspace_root: PathBuf) -> Result<(), String> {
     // Set up terminal panic hook to guarantee terminal cleanup
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        drop(disable_raw_mode());
-        drop(execute!(stdout(), LeaveAlternateScreen));
+        _ = disable_raw_mode();
+        _ = execute!(stdout(), LeaveAlternateScreen);
         default_hook(panic_info);
     }));
 
@@ -319,9 +319,9 @@ fn run_tui(workspace_root: PathBuf) -> Result<(), String> {
     let res = event_loop(&mut terminal, &mut app);
 
     // Restore terminal
-    drop(disable_raw_mode());
-    drop(execute!(terminal.backend_mut(), LeaveAlternateScreen));
-    drop(terminal.show_cursor());
+    _ = disable_raw_mode();
+    _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    _ = terminal.show_cursor();
 
     res
 }
@@ -600,11 +600,6 @@ fn handle_manual_keys(app: &mut App, code: KeyCode) {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "Unit test assertions"
-)]
 mod tests {
     #[test]
     fn test_find_agent_arg_is_order_independent() {

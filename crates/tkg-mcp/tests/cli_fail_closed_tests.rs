@@ -1,12 +1,5 @@
 //! CLI fail-closed configuration integration tests for `tkg-mcp`.
 
-#![allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::tests_outside_test_module,
-    reason = "Integration test assertions"
-)]
-
 use std::process::{Command, Stdio};
 
 #[test]
@@ -56,5 +49,5 @@ fn test_tkg_mcp_aborts_on_corrupt_tools_toml_with_line_diagnostics() {
         "expected caret pointer in stderr, got: {stderr}"
     );
 
-    drop(std::fs::remove_dir_all(&temp_dir));
+    _ = std::fs::remove_dir_all(&temp_dir);
 }

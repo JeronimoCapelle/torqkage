@@ -102,16 +102,18 @@ pub(crate) fn process_command_output(
         with_empty_fallback
     };
 
-    let final_text = if is_error
-        && let Some(fallback) = tool.error_fallback.as_deref()
-        && (error_text.contains("could not find") || error_text.contains("not found"))
-    {
-        let advice = if fallback == "token_smart_not_found" {
-            "Item not found in module tree. Verify item path or inspect module hierarchy."
+    let final_text = if is_error && let Some(fallback) = tool.error_fallback.as_deref() {
+        if fallback == "token_smart_not_found" {
+            if error_text.contains("could not find") || error_text.contains("not found") {
+                format!(
+                    "Item not found in module tree. Verify item path or inspect module hierarchy.\n\n{error_text}"
+                )
+            } else {
+                error_text
+            }
         } else {
-            fallback
-        };
-        format!("{advice}\n\n{error_text}")
+            format!("{fallback}\n\n{error_text}")
+        }
     } else {
         error_text
     };
@@ -581,12 +583,6 @@ fn evaluate_pre_flight_guards(tool: &ToolDefinition, workspace_root: &Path) -> R
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
 
@@ -599,7 +595,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let tool = ToolDefinition {
             name: "quick_check".to_owned(),
@@ -647,7 +643,7 @@ mod tests {
         assert_eq!(ledger.consecutive_failures, 0);
         assert!(!ledger.tripped);
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -659,7 +655,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let tool = ToolDefinition {
             name: "cargo_build".to_owned(),
@@ -693,7 +689,7 @@ mod tests {
         assert_eq!(ledger.consecutive_failures, 0);
         assert!(!ledger.tripped);
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -705,7 +701,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let tool = ToolDefinition {
             name: "test_guarded_tool".to_owned(),
@@ -724,7 +720,7 @@ mod tests {
         let res = evaluate_pre_flight_guards(&tool, &temp_dir);
         res.unwrap();
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -736,7 +732,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let tool = ToolDefinition {
             name: "set_active_agent".to_owned(),
@@ -763,7 +759,7 @@ mod tests {
             Some("doc-author")
         );
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -775,7 +771,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let tool = ToolDefinition {
             name: "write_file".to_owned(),
@@ -814,7 +810,7 @@ mod tests {
         };
         evaluate_pre_flight_guards(&read_tool, &temp_dir).unwrap();
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -826,7 +822,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let tool = ToolDefinition {
             name: "record_session_handoff".to_owned(),
@@ -849,7 +845,7 @@ mod tests {
         assert!(out.contains("Session handoff successfully recorded"));
         assert!(out.contains("ReadyForDV"));
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -906,5 +902,40 @@ mod tests {
         )
         .unwrap();
         assert!(output.status.success());
+    }
+
+    #[test]
+    fn test_custom_error_fallback_applies_to_all_errors() {
+        #[cfg(unix)]
+        let failing_status = {
+            use std::os::unix::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(1 << 8)
+        };
+        #[cfg(not(unix))]
+        let failing_status = std::process::Command::new("cmd")
+            .args(["/C", "exit", "1"])
+            .status()
+            .unwrap();
+
+        let output = std::process::Output {
+            status: failing_status,
+            stdout: Vec::new(),
+            stderr: b"permission denied".to_vec(),
+        };
+
+        let mut tool = ToolDefinition {
+            name: "custom_tool".to_owned(),
+            error_fallback: Some("Check workspace permissions.".to_owned()),
+            ..ToolDefinition::default()
+        };
+
+        let (msg, is_err) = process_command_output(&output, &tool, "custom");
+        assert!(is_err);
+        assert!(msg.contains("Check workspace permissions."));
+        assert!(msg.contains("permission denied"));
+
+        tool.error_fallback = Some("token_smart_not_found".to_owned());
+        let (smart_msg, _) = process_command_output(&output, &tool, "custom");
+        assert!(!smart_msg.contains("Item not found in module tree"));
     }
 }

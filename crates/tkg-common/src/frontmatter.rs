@@ -362,7 +362,11 @@ pub fn candidate_agent_directories_with_config(
     // 2. Standard workspace locations
     dirs.push(workspace_root.join("agents"));
     dirs.push(workspace_root.join(".tkg/agents"));
-    dirs.push(workspace_root.join("plugins/torqkage/agents"));
+    dirs.push(
+        workspace_root
+            .join(crate::harness::local_plugin_rel_dir())
+            .join("agents"),
+    );
     dirs.push(workspace_root.join(".agents/agents"));
     dirs.push(workspace_root.join(".agents"));
 
@@ -412,12 +416,7 @@ pub fn find_agent_manifest(workspace_root: &Path, agent_name: &str) -> Option<Pa
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 

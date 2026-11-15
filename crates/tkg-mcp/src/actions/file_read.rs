@@ -120,8 +120,8 @@ fn slice_lines(text: &str, start_opt: Option<u64>, end_opt: Option<u64>) -> Stri
 
     let mut selected = Vec::new();
     for (idx, line) in text.lines().enumerate() {
-        let line_num = idx.saturating_add(1);
-        if line_num >= start.saturating_add(1) && line_num <= end {
+        let line_num = idx + 1;
+        if line_num > start && line_num <= end {
             selected.push(line);
         }
     }
@@ -130,13 +130,7 @@ fn slice_lines(text: &str, start_opt: Option<u64>, end_opt: Option<u64>) -> Stri
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use super::*;
 
@@ -150,7 +144,7 @@ mod tests {
     #[test]
     fn test_file_read_inverted_bounds_error() {
         let temp = std::env::temp_dir().join(format!("tkg_read_bounds_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
         std::fs::create_dir_all(&temp).expect("create dir");
         let file_path = temp.join("test.txt");
         std::fs::write(&file_path, "Line 1\nLine 2\n").expect("write test file");
@@ -174,7 +168,7 @@ mod tests {
     #[test]
     fn test_file_read_scoped_path_resolution() {
         let temp = std::env::temp_dir().join(format!("tkg_read_scoped_{}", std::process::id()));
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
         std::fs::create_dir_all(temp.join("src/auth")).expect("create src/auth");
         std::fs::create_dir_all(temp.join("docs/specs")).expect("create docs/specs");
         std::fs::write(temp.join("src/auth/hasher.rs"), "pub fn hash() {}").expect("write hasher");
@@ -243,6 +237,6 @@ mod tests {
             "contains non-UTF-8 or binary data (8 bytes) and cannot be displayed as plain text"
         ));
 
-        drop(std::fs::remove_dir_all(&temp));
+        _ = std::fs::remove_dir_all(&temp);
     }
 }

@@ -139,8 +139,7 @@ lossy_float_literal = "deny"
 float_cmp = "deny"
 float_cmp_const = "deny"
 
-# Arithmetic & Safety Invariants
-arithmetic_side_effects = "deny"
+# Safety Invariants
 suspicious_xor_used_as_pow = "deny"
 mem_forget = "deny"
 exit = "deny"

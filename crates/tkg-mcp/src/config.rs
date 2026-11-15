@@ -48,12 +48,6 @@ pub(crate) fn load_full_config_from_path(path: &Path) -> Result<LoadedConfigurat
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
     use crate::models::ToolAction;

@@ -149,14 +149,14 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let res = check_wip_changes(&temp_dir, Some("test_session"), 10);
         assert!(res.is_clean());
         assert_eq!(res.format_notice(), None);
         assert!(res.format_status_message().contains("Working copy clean"));
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

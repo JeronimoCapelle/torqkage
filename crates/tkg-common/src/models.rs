@@ -699,12 +699,6 @@ pub fn extract_bracketed_error_code(output: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
 
@@ -829,7 +823,7 @@ mod tests {
             "cb_test_{}",
             jiff::Timestamp::now().as_nanosecond()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
 
         let mut ledger = CircuitBreakerLedger::new("worker_agent");
         assert_eq!(ledger.consecutive_failures, 0);
@@ -878,7 +872,7 @@ mod tests {
         assert_eq!(loaded_clean.consecutive_failures, 0);
         assert!(!loaded_clean.tripped);
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

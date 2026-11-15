@@ -232,9 +232,9 @@ pub(crate) fn launch_agent_interactive(
     }
 
     // 2. Suspend Ratatui & restore terminal to normal canonical mode
-    drop(disable_raw_mode());
-    drop(execute!(stdout(), LeaveAlternateScreen));
-    drop(terminal.show_cursor());
+    _ = disable_raw_mode();
+    _ = execute!(stdout(), LeaveAlternateScreen);
+    _ = terminal.show_cursor();
 
     let (effective_workspace, was_isolated) =
         resolve_launch_workspace(workspace_root, &agent.name, isolated_workspace);
@@ -259,10 +259,14 @@ pub(crate) fn launch_agent_interactive(
             runner.harness, agent.name
         );
     }
-    println!(
-        "   Effort: {} | Permissions: {} | Policy: {}",
-        agent.effort, agent.permission_mode, agent.command_execution_policy
-    );
+    if runner.harness().uses_agy_frontmatter() {
+        println!(
+            "   Effort: {} | Permissions: {} | Policy: {}",
+            agent.effort, agent.permission_mode, agent.command_execution_policy
+        );
+    } else {
+        println!("   Effort: {}", agent.effort);
+    }
     println!(
         "   Sandbox: {}",
         if sandbox {
@@ -320,11 +324,11 @@ pub(crate) fn launch_agent_interactive(
     }
 
     // 4. Resume Ratatui & crossterm alternate screen regardless of status
-    drop(enable_raw_mode());
+    _ = enable_raw_mode();
     let mut stdout_handle = stdout();
-    drop(execute!(stdout_handle, EnterAlternateScreen));
-    drop(terminal.clear());
-    drop(terminal.hide_cursor());
+    _ = execute!(stdout_handle, EnterAlternateScreen);
+    _ = terminal.clear();
+    _ = terminal.hide_cursor();
 
     status_res.map_err(|e| format!("Failed to execute '{binary}': {e}"))
 }
@@ -414,12 +418,6 @@ pub(crate) fn launch_agent_headless(
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use std::path::PathBuf;
 

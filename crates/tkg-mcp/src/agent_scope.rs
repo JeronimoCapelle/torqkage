@@ -15,11 +15,11 @@ pub(crate) fn resolve_agent_scope(args: &[String], workspace_root: &Path) -> Opt
     while i < args.len() {
         if let Some(arg) = args.get(i)
             && (arg == "--agent" || arg == "-a" || arg == "--scope" || arg == "-s")
-            && let Some(val) = args.get(i.saturating_add(1))
+            && let Some(val) = args.get(i + 1)
         {
             return Some(val.trim().to_owned());
         }
-        i = i.saturating_add(1);
+        i += 1;
     }
 
     // 2. Check environment variables and persistent agent state bridge via
@@ -90,11 +90,6 @@ pub(crate) fn resolve_agent_guards(
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "Unit tests allow panics on test setup"
-)]
 mod tests {
     use super::*;
 
@@ -137,6 +132,6 @@ mod tests {
             Some("agent_beta".to_owned())
         );
 
-        drop(fs::remove_dir_all(&temp_dir));
+        _ = fs::remove_dir_all(&temp_dir);
     }
 }

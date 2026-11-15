@@ -53,7 +53,7 @@ pub(crate) fn print_fleet_status(agents: &[AgentManifest], tools: &[ToolItem]) {
             let mut line = String::from("    ");
             for (idx, tool) in agent.mcp_tools.iter().enumerate() {
                 line.push_str(tool);
-                if idx.saturating_add(1) < agent.mcp_tools.len() {
+                if idx + 1 < agent.mcp_tools.len() {
                     line.push_str(", ");
                 }
                 if line.len() > 72 {

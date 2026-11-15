@@ -193,7 +193,6 @@ pub(crate) fn tool_requires_gate(tool_name: &str, root: &Path, gate_name: &str) 
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "Unit test assertions")]
 mod tests {
     use serde_json::json;
     use tkg_common::models::{HookDecision, ToolCallPayload};
@@ -252,7 +251,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
         drop(std::fs::write(
             temp_dir.join("tools.toml"),
             "[tools.modify_code]\nmutating = true\n",
@@ -287,7 +286,7 @@ mod tests {
         assert_eq!(res.decision, HookDecision::Ask);
         assert!(res.reason.unwrap().contains("CIRCUIT BREAKER TRIPPED"));
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -299,7 +298,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        drop(std::fs::create_dir_all(&temp_dir));
+        _ = std::fs::create_dir_all(&temp_dir);
         drop(std::fs::write(
             temp_dir.join("tools.toml"),
             "[tools.custom_db_migrate]\nmutating = true\naction = \"static_command\"\n",
@@ -321,7 +320,7 @@ mod tests {
                 .contains("applies automated filesystem or code modifications")
         );
 
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

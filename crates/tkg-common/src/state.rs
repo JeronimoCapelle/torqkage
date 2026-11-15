@@ -256,7 +256,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(clippy::expect_used, reason = "Unit test assertions")]
     fn test_tkg_state_paths_structure() {
         let root = PathBuf::from("/home/user/project");
         let paths = TkgStatePaths::new(&root);
@@ -293,7 +292,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used, reason = "Unit test assertions")]
     fn test_ensure_directories_creates_self_protecting_gitignore() {
         let temp_dir = std::env::temp_dir().join(format!("tkg_paths_test_{}", std::process::id()));
         let paths = TkgStatePaths::new(&temp_dir);
@@ -311,12 +309,11 @@ mod tests {
         let content = std::fs::read_to_string(&gitignore).expect("read gitignore");
         assert_eq!(content, "*\n");
 
-        drop(std::fs::remove_dir_all(paths.root()));
-        drop(std::fs::remove_dir_all(&temp_dir));
+        _ = std::fs::remove_dir_all(paths.root());
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
-    #[allow(clippy::unwrap_used, reason = "Unit test assertions")]
     fn test_resolve_active_agent_from_file() {
         let temp_dir =
             std::env::temp_dir().join(format!("tkg_test_resolve_agent_{}", std::process::id()));
@@ -336,7 +333,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::unwrap_used, reason = "Unit test assertions")]
     fn test_state_writes_fail_closed_on_unwritable_state_dir() {
         let temp_dir = std::env::temp_dir().join(format!(
             "tkg_test_unwritable_state_{}_{}",

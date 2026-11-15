@@ -279,11 +279,11 @@ fn extract_man_snippet(man_text: &str) -> Option<String> {
 
         if started {
             snippet_lines.push(line);
-            count = count.saturating_add(1);
+            count += 1;
         } else if !trimmed.is_empty() {
             started = true;
             snippet_lines.push(line);
-            count = count.saturating_add(1);
+            count += 1;
         }
     }
 
@@ -325,12 +325,6 @@ fn default_tool_catalog(tool: &ToolDefinition, available_tools: &[ToolDefinition
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "Unit test assertions"
-)]
 mod tests {
     use super::*;
 

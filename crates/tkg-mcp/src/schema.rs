@@ -222,13 +222,7 @@ fn build_parameterized_schema(args: &[crate::models::ToolArg]) -> serde_json::Va
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    reason = "Unit test assertions"
-)]
+#[allow(clippy::indexing_slicing, reason = "Unit test assertions")]
 mod tests {
     use super::*;
     use crate::models::ToolArg;
