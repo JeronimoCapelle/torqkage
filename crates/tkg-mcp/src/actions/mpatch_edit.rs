@@ -382,4 +382,51 @@ test_attributes = ["test", "cfg(test"]
         });
         assert!(execute(&tool, &temp, &tampered_args, Some("tests_agent"), &guards).is_err());
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_malformed_or_nonmatching_patches_fail_closed_without_corrupting_file(
+                patch_body in "\\PC{0,180}",
+                original_line in "[a-zA-Z0-9_ ()]{5,40}",
+            ) {
+                let temp = create_test_dir("prop_mpatch");
+                std::fs::create_dir_all(temp.join("src")).expect("mkdir src");
+                let src_file = temp.join("src/lib.rs");
+                let initial = format!("pub fn sample() -> &'static str {{\n    \"{original_line}\"\n}}\n");
+                std::fs::write(&src_file, &initial).expect("write target");
+
+                let tool = ToolDefinition {
+                    name: "modify_code".to_owned(),
+                    safety: tkg_common::tools::ToolSafetyPolicy {
+                        mutating: true,
+                        ..Default::default()
+                    },
+                    sandbox: tkg_common::tools::ToolSandboxPolicy {
+                        enforce_workspace_bounds: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let args = json!({
+                    "path": "src/lib.rs",
+                    "patch": patch_body,
+                });
+
+                let res = execute(&tool, &temp, &args, None, &BTreeMap::new());
+                let after = std::fs::read_to_string(&src_file).expect("read target");
+                if res.is_err() {
+                    prop_assert_eq!(after, initial);
+                }
+
+                _ = std::fs::remove_dir_all(&temp);
+            }
+        }
+    }
 }

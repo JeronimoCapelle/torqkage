@@ -1439,6 +1439,95 @@ mod tests {
             // filter_output may append one "... trimmed ..." summary line on overflow
             prop_assert!(out.lines().count() <= max_lines + 3);
         }
+
+        #[test]
+        fn prop_agent_guard_strictly_confines_arbitrary_paths(
+            allowed_dir in "[a-z]{2,8}",
+            denied_dir in "[a-z]{2,8}",
+            arbitrary in "[a-zA-Z0-9_./-]{1,40}",
+            sub_file in "[a-z0-9_]{1,10}\\.rs",
+        ) {
+            let root = Path::new("/tmp/tkg_guard_prop_root");
+            let mut guards = BTreeMap::new();
+            guards.insert(
+                "scoped".to_owned(),
+                AgentGuard {
+                    allowed_dirs: vec![allowed_dir.clone()],
+                    disallowed_dirs: vec![denied_dir.clone()],
+                    ..Default::default()
+                },
+            );
+
+            // 1. Prefix-lookalike (`<allowed>_extra/...`) must never pass allowed_dirs.
+            let prefix_lookalike = format!("{allowed_dir}_extra/{sub_file}");
+            let lookalike_res =
+                check_agent_guard(root, &root.join(&prefix_lookalike), Some("scoped"), &guards);
+            prop_assert!(lookalike_res.is_err());
+
+            // 2. Any arbitrary path resolves `Ok` only if component-scoped to allowed_dir
+            //    and NOT scoped to denied_dir.
+            let arb_res = check_agent_guard(root, &root.join(&arbitrary), Some("scoped"), &guards);
+            let inside_allowed = tkg_common::matches_directory_scope(&arbitrary, &allowed_dir);
+            let inside_denied = tkg_common::matches_directory_scope(&arbitrary, &denied_dir);
+            if inside_allowed && !inside_denied {
+                prop_assert!(arb_res.is_ok(), "unexpected deny for {arbitrary}: {arb_res:?}");
+            } else {
+                prop_assert!(arb_res.is_err(), "unexpected allow for {arbitrary}");
+            }
+        }
+
+        #[test]
+        fn prop_enforce_boundaries_exact_on_arbitrary_strings(
+            target_dir in "[a-z]{2,8}",
+            target_file in "[a-z0-9_]{2,10}/[a-z0-9_]{2,10}\\.rs",
+            arbitrary in "[a-zA-Z0-9_./-]{1,40}",
+            sub in "[a-z0-9_]{1,8}\\.rs",
+        ) {
+            let root = Path::new("/tmp/tkg_boundaries_prop_root");
+
+            // Exact file lock: only exact match passes.
+            let file_res =
+                check_enforce_boundaries(root, &root.join(&arbitrary), None, Some(&target_file));
+            prop_assert_eq!(file_res.is_ok(), arbitrary == target_file);
+
+            // Enforce dir rejects prefix-lookalike (`<target_dir>_leak/x.rs`) and non-members.
+            let lookalike = format!("{target_dir}_leak/{sub}");
+            prop_assert!(check_enforce_boundaries(root, &root.join(&lookalike), Some(&target_dir), None).is_err());
+
+            let inside = format!("{target_dir}/{sub}");
+            prop_assert!(check_enforce_boundaries(root, &root.join(&inside), Some(&target_dir), None).is_ok());
+
+            let dir_res =
+                check_enforce_boundaries(root, &root.join(&arbitrary), Some(&target_dir), None);
+            let matches_dir = tkg_common::matches_directory_scope(&arbitrary, &target_dir);
+            prop_assert_eq!(dir_res.is_ok(), matches_dir);
+        }
+
+        #[test]
+        fn prop_dangerous_files_rejects_arbitrary_secret_variants(
+            prefix in "[a-z0-9_]{1,8}",
+            suffix in "[a-z0-9_]{1,8}",
+        ) {
+            for dangerous in [
+                ".env".to_owned(),
+                format!("{prefix}/.env"),
+                format!("{prefix}/.env.{suffix}"),
+                format!(".git/{suffix}"),
+                format!(".jj/{suffix}"),
+                format!("secrets/{suffix}.pem"),
+                format!("{prefix}/{suffix}.key"),
+                format!("{prefix}/id_rsa"),
+                format!("{prefix}/id_ed25519"),
+            ] {
+                prop_assert!(
+                    check_dangerous_files(Path::new(&dangerous)).is_err(),
+                    "expected reject for {dangerous}"
+                );
+            }
+
+            let safe = format!("src/{prefix}_{suffix}.rs");
+            prop_assert!(check_dangerous_files(Path::new(&safe)).is_ok());
+        }
         }
     }
 }

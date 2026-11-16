@@ -1027,4 +1027,196 @@ mod tests {
 
         _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(48))]
+
+            #[test]
+            fn prop_server_adversarial_rpc_scoping_and_breaker(
+                method in prop_oneof![
+                    Just("tools/call"),
+                    Just("resources/read"),
+                    Just("prompts/get"),
+                    Just("unknown/method"),
+                ],
+                tool_name in "[a-z_]{1,20}",
+                raw_path in prop_oneof![
+                    Just("../../etc/passwd"),
+                    Just(".git/config"),
+                    Just("Cargo.toml"),
+                    Just("package.json"),
+                    Just("src/clean.rs"),
+                ],
+                call_id in 1i64..1000,
+            ) {
+                let temp_dir = std::env::temp_dir().join(format!(
+                    "tkg_mcp_server_prop_{}_{}",
+                    std::process::id(),
+                    call_id
+                ));
+                _ = std::fs::remove_dir_all(&temp_dir);
+                std::fs::create_dir_all(temp_dir.join("src")).expect("mkdir src");
+                std::fs::write(temp_dir.join("Cargo.toml"), "[package]\nname = \"x\"\n")
+                    .expect("write Cargo.toml");
+
+                std::fs::create_dir_all(temp_dir.join("plugins/torqkage/agents"))
+                    .expect("mkdir agents");
+                std::fs::write(
+                    temp_dir.join("plugins/torqkage/agents/readonly_agent.md"),
+                    "---\nname: readonly_agent\nmcp_tools:\n  - read_file\n---\n",
+                )
+                .expect("write readonly_agent.md");
+
+                let write_safety = tkg_common::tools::ToolSafetyPolicy {
+                    mutating: true,
+                    ..Default::default()
+                };
+                let write_sandbox = tkg_common::tools::ToolSandboxPolicy {
+                    enforce_workspace_bounds: true,
+                    ban_dangerous_files: true,
+                    ..Default::default()
+                };
+
+                let tools = vec![
+                    ToolDefinition {
+                        name: "read_file".to_owned(),
+                        action: ToolAction::FileRead,
+                        ..Default::default()
+                    },
+                    ToolDefinition {
+                        name: "write_project_file".to_owned(),
+                        action: ToolAction::FileWrite,
+                        safety: write_safety,
+                        sandbox: write_sandbox.clone(),
+                        ..Default::default()
+                    },
+                ];
+
+                let mut guards = BTreeMap::new();
+                guards.insert(
+                    "readonly_agent".to_owned(),
+                    AgentGuard {
+                        allowed_dirs: vec!["src".to_owned()],
+                        allowed_files: vec!["src/*.rs".to_owned()],
+                        ..Default::default()
+                    },
+                );
+
+                let server = McpServer::new(
+                    tools,
+                    temp_dir.clone(),
+                    Some("readonly_agent".to_owned()),
+                    guards,
+                );
+
+                // 1. Arbitrary method dispatch never panics and always emits a JSON-RPC response when id is set
+                let arb_resp = server.handle_request(JsonRpcRequest {
+                    jsonrpc: "2.0".to_owned(),
+                    id: Some(json!(call_id)),
+                    method: method.to_owned(),
+                    params: Some(json!({ "name": tool_name, "arguments": { "path": raw_path } })),
+                });
+                prop_assert!(arb_resp.is_some());
+
+                // 2. Scoped agent cannot call unpermitted `write_project_file`
+                let denied_resp = server
+                    .handle_request(JsonRpcRequest {
+                        jsonrpc: "2.0".to_owned(),
+                        id: Some(json!(call_id + 1)),
+                        method: "tools/call".to_owned(),
+                        params: Some(json!({
+                            "name": "write_project_file",
+                            "arguments": { "path": raw_path, "content": "x" }
+                        })),
+                    })
+                    .expect("json-rpc response");
+                if let Some(err) = &denied_resp.error {
+                    prop_assert!(err.code != 0);
+                } else if let Some(res) = &denied_resp.result {
+                    prop_assert_eq!(&res["isError"], &json!(true));
+                }
+
+                // 3. Even an unscoped write call to traversal / .git fails closed; and a guarded
+                //    agent allowed to call `write_project_file` is still blocked from manifests.
+                let unscoped = McpServer::new(
+                    vec![ToolDefinition {
+                        name: "write_project_file".to_owned(),
+                        action: ToolAction::FileWrite,
+                        safety: write_safety,
+                        sandbox: write_sandbox.clone(),
+                        ..Default::default()
+                    }],
+                    temp_dir.clone(),
+                    None,
+                    BTreeMap::new(),
+                );
+                if raw_path == "../../etc/passwd" || raw_path == ".git/config" {
+                    let write_resp = unscoped
+                        .handle_request(JsonRpcRequest {
+                            jsonrpc: "2.0".to_owned(),
+                            id: Some(json!(call_id + 2)),
+                            method: "tools/call".to_owned(),
+                            params: Some(json!({
+                                "name": "write_project_file",
+                                "arguments": { "path": raw_path, "content": "pwn" }
+                            })),
+                        })
+                        .expect("write response");
+                    if let Some(res) = write_resp.result {
+                        prop_assert_eq!(&res["isError"], &json!(true));
+                    }
+                }
+
+                std::fs::write(
+                    temp_dir.join("plugins/torqkage/agents/guarded_writer.md"),
+                    "---\nname: guarded_writer\nmcp_tools:\n  - write_project_file\n---\n",
+                )
+                .expect("write guarded_writer.md");
+                let mut guarded_map = BTreeMap::new();
+                guarded_map.insert(
+                    "guarded_writer".to_owned(),
+                    AgentGuard {
+                        allowed_dirs: vec!["src".to_owned()],
+                        allowed_files: vec!["src/*.rs".to_owned()],
+                        ..Default::default()
+                    },
+                );
+                let guarded_server = McpServer::new(
+                    vec![ToolDefinition {
+                        name: "write_project_file".to_owned(),
+                        action: ToolAction::FileWrite,
+                        safety: write_safety,
+                        sandbox: write_sandbox,
+                        ..Default::default()
+                    }],
+                    temp_dir.clone(),
+                    Some("guarded_writer".to_owned()),
+                    guarded_map,
+                );
+                if raw_path != "src/clean.rs" {
+                    let guarded_resp = guarded_server
+                        .handle_request(JsonRpcRequest {
+                            jsonrpc: "2.0".to_owned(),
+                            id: Some(json!(call_id + 3)),
+                            method: "tools/call".to_owned(),
+                            params: Some(json!({
+                                "name": "write_project_file",
+                                "arguments": { "path": raw_path, "content": "pwn" }
+                            })),
+                        })
+                        .expect("guarded response");
+                    if let Some(res) = guarded_resp.result {
+                        prop_assert_eq!(&res["isError"], &json!(true));
+                    }
+                }
+
+                _ = std::fs::remove_dir_all(&temp_dir);
+            }
+        }
+    }
 }

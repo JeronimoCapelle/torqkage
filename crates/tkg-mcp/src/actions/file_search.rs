@@ -645,4 +645,97 @@ mod tests {
 
         _ = std::fs::remove_dir_all(&temp);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+        use serde_json::json;
+
+        use super::*;
+
+        struct TempDirGuard(std::path::PathBuf);
+        impl Drop for TempDirGuard {
+            fn drop(&mut self) {
+                _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(48))]
+
+            #[test]
+            fn prop_file_search_arbitrary_patterns_never_panic(
+                raw_pattern in "[a-zA-Z0-9_\\[\\]\\(\\)\\*\\+\\?\\.\\^\\$ -]{1,32}",
+                is_regex in proptest::option::of(proptest::bool::ANY),
+                case_sensitive in proptest::bool::ANY,
+            ) {
+                let pattern = raw_pattern.trim();
+                let effective_pattern = if pattern.is_empty() { "SPEC" } else { pattern };
+
+                let temp = create_test_dir("prop-pattern");
+                let _cleanup = TempDirGuard(temp.clone());
+                let docs_dir = temp.join("docs");
+                std::fs::create_dir_all(&docs_dir).expect("create docs");
+                std::fs::write(
+                    docs_dir.join("spec.md"),
+                    "# Spec\nOPCODE_CALL = 0x10;\nLiteral [A-Z]+ (test)? *\n",
+                )
+                .expect("write spec");
+
+                let tool = ToolDefinition {
+                    name: "query_project_spec".to_owned(),
+                    enforce_dir: Some("docs".to_owned()),
+                    ..Default::default()
+                };
+                let args = json!({
+                    "pattern": effective_pattern,
+                    "is_regex": is_regex,
+                    "case_sensitive": case_sensitive,
+                });
+
+                let res = execute(&tool, &temp, &args);
+                if is_regex == Some(true) {
+                    // Explicit regex mode either succeeds or fails cleanly with an invalid-regex error.
+                    prop_assert!(res.is_ok() || res.as_ref().is_err_and(|e| e.contains("Invalid regex")));
+                } else {
+                    prop_assert!(res.is_ok());
+                }
+            }
+
+            #[test]
+            fn prop_file_search_blocks_arbitrary_traversal_and_never_bleeds_src(
+                seg in "[a-zA-Z0-9_.-]{1,16}",
+                secret_token in "TOK_[A-Z0-9]{8,16}",
+            ) {
+                let temp = create_test_dir("prop-confine");
+                let _cleanup = TempDirGuard(temp.clone());
+                let src_dir = temp.join("src");
+                std::fs::create_dir_all(&src_dir).expect("create src");
+                let src_line = format!("pub const SECRET: &str = \"{secret_token}\";\n");
+                std::fs::write(src_dir.join("secret.rs"), src_line).expect("write src");
+
+                let doc_tool = ToolDefinition {
+                    name: "query_project_spec".to_owned(),
+                    category: Some("documentation".to_owned()),
+                    sandbox: tkg_common::tools::ToolSandboxPolicy {
+                        enforce_workspace_bounds: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+
+                // 1. Traversals and absolute escapes are rejected with security policy violation.
+                for bad_path in [format!("../{seg}"), format!("docs/../../{seg}"), format!("/{seg}")] {
+                    let args = json!({ "pattern": "SECRET", "path": bad_path });
+                    let res = execute(&doc_tool, &temp, &args);
+                    prop_assert!(res.is_err_and(|e| e.contains("Security policy violation")));
+                }
+
+                // 2. Searching docs without path must never read `src/` when no doc paths exist.
+                let bleed_args = json!({ "pattern": secret_token });
+                let bleed_res = execute(&doc_tool, &temp, &bleed_args).expect("doc query succeeds");
+                prop_assert!(!bleed_res.contains("src/secret.rs"));
+                prop_assert!(!bleed_res.contains(&secret_token));
+            }
+        }
+    }
 }

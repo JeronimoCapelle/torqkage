@@ -699,3 +699,86 @@ fn test_zero_toml_workspace_enforces_manifest_guard_and_circuit_breaker() {
 
     _ = std::fs::remove_dir_all(&ws);
 }
+
+mod prop_e2e_tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(24))]
+
+        #[test]
+        fn prop_e2e_binary_blocks_nested_manifests_across_all_dialects(
+            dialect_idx in 0usize..4,
+            manifest_idx in 0usize..tkg_common::DEFAULT_PROTECTED_MANIFESTS.len(),
+            tool_name in prop_oneof![Just("Edit"), Just("Write"), Just("edit_file"), Just("apply_patch")],
+            subdir in prop::option::of("[a-z]{2,7}"),
+        ) {
+            let ws = std::env::temp_dir().join(format!("tkg_e2e_prop_{}", std::process::id()));
+            _ = std::fs::remove_dir_all(&ws);
+            std::fs::create_dir_all(&ws).expect("create e2e ws");
+
+            let manifest = tkg_common::DEFAULT_PROTECTED_MANIFESTS
+                .get(manifest_idx)
+                .copied()
+                .unwrap_or("Cargo.toml");
+            let target_path = subdir.map_or_else(
+                || manifest.to_owned(),
+                |d| format!("{d}/{manifest}"),
+            );
+
+            // Place path inside nested edits/args to test deep recursive extraction end-to-end.
+            let nested_args = serde_json::json!({
+                "edits": [{ "file_path": target_path }]
+            });
+            let payload = match dialect_idx {
+                0 => serde_json::json!({
+                    "hook_event_name": "PreToolUse",
+                    "cwd": ws,
+                    "tool_name": tool_name,
+                    "tool_input": nested_args,
+                }),
+                1 => serde_json::json!({
+                    "hook_event_name": "BeforeTool",
+                    "cwd": ws,
+                    "tool_name": tool_name,
+                    "tool_input": nested_args,
+                }),
+                2 => serde_json::json!({
+                    "hook_event_name": "preToolUse",
+                    "cwd": ws,
+                    "tool_name": tool_name,
+                    "tool_input": nested_args,
+                }),
+                _ => serde_json::json!({
+                    "hook_event_name": "preToolUse",
+                    "cwd": ws,
+                    "toolName": tool_name,
+                    "toolArgs": nested_args.to_string(),
+                }),
+            }
+            .to_string();
+
+            let (code, out, err) =
+                run_hook_subcommand_with_env("pre-tool-use", Some(&payload), &[]);
+            let _ = &err;
+            prop_assert_eq!(code, Some(0));
+            let is_ask = out.contains("MANIFEST MUTATION GUARD")
+                && (out.contains("ask") || out.contains("hookSpecificOutput"));
+            prop_assert!(is_ask, "dialect {} allowed {}: {}", dialect_idx, target_path, out);
+
+            _ = std::fs::remove_dir_all(&ws);
+        }
+
+        #[test]
+        fn prop_e2e_binary_survives_arbitrary_malformed_stdin(
+            raw_stdin in "\\PC{0,160}",
+        ) {
+            let (code, _out, _err) =
+                run_hook_subcommand_with_env("pre-tool-use", Some(&raw_stdin), &[]);
+            // Binary must always terminate cleanly with a defined exit code (never panic/signal-abort).
+            prop_assert!(code.is_some());
+        }
+    }
+}

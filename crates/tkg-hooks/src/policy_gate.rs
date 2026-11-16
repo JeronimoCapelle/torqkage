@@ -395,4 +395,49 @@ action = "file_read"
         // Tool 4: unrelated has no gates
         assert!(!config.tool_requires_gate("unrelated", "vcs_conflicts"));
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_corrupt_tools_toml_always_fails_closed(
+                garbage in "\\PC{1,120}",
+            ) {
+                let dir = std::env::temp_dir().join(format!(
+                    "tkg_hooks_policy_prop_{}",
+                    std::process::id()
+                ));
+                _ = std::fs::remove_dir_all(&dir);
+                std::fs::create_dir_all(dir.join(".tkg")).expect("mkdir .tkg");
+
+                // Unclosed TOML table header + arbitrary payload must ALWAYS fail closed.
+                let broken_toml = format!("[tools.broken\nkey = \"{garbage}");
+                std::fs::write(dir.join(".tkg/tools.toml"), broken_toml).expect("write broken");
+                prop_assert!(ParsedToolsConfig::try_load(&dir).is_err());
+
+                _ = std::fs::remove_dir_all(&dir);
+            }
+
+            #[test]
+            fn prop_cyclic_or_arbitrary_inheritance_never_panics(
+                name_a in "[a-z]{2,8}",
+                name_b in "[a-z]{2,8}",
+                mutating in any::<bool>(),
+            ) {
+                let toml_text = format!(
+                    "[tools.{name_a}]\ninherit = \"tools.{name_b}\"\nmutating = {mutating}\n\
+                     [tools.{name_b}]\ninherit = \"tools.{name_a}\"\n"
+                );
+                let parsed = ParsedToolsConfig::from_str(&toml_text);
+                // Must terminate cleanly without infinite recursion.
+                _ = parsed.is_mutating(&name_a);
+                _ = parsed.is_mutating_with_fallback(&name_b);
+            }
+        }
+    }
 }

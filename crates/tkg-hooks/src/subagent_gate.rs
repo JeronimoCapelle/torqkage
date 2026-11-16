@@ -156,4 +156,75 @@ mod tests {
 
         _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_non_subagent_tools_always_allowed(
+                tool_name in "[a-zA-Z0-9_.-]{0,24}",
+                type_name in ".{0,32}",
+            ) {
+                let effective_tool = if tool_name == "invoke_subagent" {
+                    format!("{tool_name}_other")
+                } else {
+                    tool_name
+                };
+                let input = PreToolUseInput {
+                    tool_call: Some(ToolCallPayload {
+                        name: effective_tool,
+                        args: json!({
+                            "TypeName": type_name,
+                            "Role": "Tester",
+                            "Prompt": "Task"
+                        }),
+                    }),
+                    ..Default::default()
+                };
+                let res = evaluate_tool_invocation_for_tools(&input, &["invoke_subagent".to_owned()]);
+                prop_assert_eq!(res.decision, tkg_common::models::HookDecision::Allow);
+            }
+
+            #[test]
+            fn prop_subagent_gate_handles_arbitrary_type_names_and_key_aliases(
+                type_name in "[a-zA-Z0-9_./:-]{0,40}",
+                key in prop_oneof![Just("TypeName"), Just("typeName"), Just("type_name")],
+            ) {
+                let dir_id = format!(
+                    "subagent_prop_{}_{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock")
+                        .as_nanos()
+                );
+                let temp_dir = std::env::temp_dir().join(dir_id);
+                let agents_dir = temp_dir.join("plugins/torqkage/agents");
+                _ = std::fs::create_dir_all(&agents_dir);
+                _ = std::fs::write(
+                    agents_dir.join("clean_agent.md"),
+                    "---\nname: clean_agent\npre_launch_checks:\n  - vcs_conflicts\n---\nPrompt",
+                );
+
+                let mut args_map = serde_json::Map::new();
+                args_map.insert(key.to_owned(), Value::String(type_name));
+                let mut input = PreToolUseInput {
+                    tool_call: Some(ToolCallPayload {
+                        name: "invoke_subagent".to_owned(),
+                        args: Value::Object(args_map),
+                    }),
+                    ..Default::default()
+                };
+                input.common.workspace_paths = vec![temp_dir.clone()];
+
+                let res = evaluate_tool_invocation_for_tools(&input, &["invoke_subagent".to_owned()]);
+                prop_assert_eq!(res.decision, tkg_common::models::HookDecision::Allow);
+
+                _ = std::fs::remove_dir_all(&temp_dir);
+            }
+        }
+    }
 }

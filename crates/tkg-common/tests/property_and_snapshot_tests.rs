@@ -250,6 +250,74 @@ proptest! {
             prop_assert!(formatted.is_ok());
         }
     }
+
+    #[test]
+    fn prop_comments_only_allows_arbitrary_comment_and_blocks_code_mutation(
+        val_a in 1u32..500,
+        delta in 1u32..500,
+        comment_text in "[a-zA-Z0-9 _.:;?!-]{1,60}",
+    ) {
+        let policy = PathPolicy::comments_only("src");
+        let val_b = val_a.saturating_add(delta);
+        let original = format!("pub fn value() -> u32 {{\n    {val_a}\n}}\n");
+        let comment_only = format!(
+            "/// {comment_text}\npub fn value() -> u32 {{\n    // {comment_text}\n    {val_a}\n}}\n"
+        );
+        let code_tampered = format!(
+            "/// {comment_text}\npub fn value() -> u32 {{\n    {val_b}\n}}\n"
+        );
+        prop_assert!(policy.verify(&original, &comment_only).is_ok());
+        prop_assert!(policy.verify(&original, &code_tampered).is_err());
+    }
+
+    #[test]
+    fn prop_delimited_allows_arbitrary_inner_edit_and_rejects_outside_edit(
+        header in "[a-zA-Z0-9_]{3,16}",
+        footer in "[a-zA-Z0-9_]{3,16}",
+        inner_after in "[a-zA-Z0-9 _=;]{1,40}",
+    ) {
+        let policy = PathPolicy::delimited("src/gen.rs", "// BEGIN AUTOGEN", "// END AUTOGEN");
+        let original = format!(
+            "let h = \"{header}\";\n// BEGIN AUTOGEN\nlet x = 1;\n// END AUTOGEN\nlet f = \"{footer}\";\n"
+        );
+        let valid = format!(
+            "let h = \"{header}\";\n// BEGIN AUTOGEN\n{inner_after}\n// END AUTOGEN\nlet f = \"{footer}\";\n"
+        );
+        let outside_tamper = format!(
+            "let h = \"{header}_tamper\";\n// BEGIN AUTOGEN\n{inner_after}\n// END AUTOGEN\nlet f = \"{footer}\";\n"
+        );
+        prop_assert!(policy.verify(&original, &valid).is_ok());
+        prop_assert!(policy.verify(&original, &outside_tamper).is_err());
+    }
+
+    #[test]
+    fn prop_tests_only_allows_arbitrary_test_add_and_blocks_prod_mutation(
+        val_a in 1u32..500,
+        delta in 1u32..500,
+        test_name in "[a-z][a-z0-9_]{2,15}",
+    ) {
+        let policy = PathPolicy::tests_only("src");
+        let rs_syntax = rust_syntax();
+        let val_b = val_a.saturating_add(delta);
+        let original = format!("pub fn compute() -> u32 {{\n    {val_a}\n}}\n");
+        let valid_test = format!(
+            "pub fn compute() -> u32 {{\n    {val_a}\n}}\n\n#[cfg(test)]\nmod tests {{\n    #[test]\n    fn {test_name}() {{\n        assert_eq!(super::compute(), {val_a});\n    }}\n}}\n"
+        );
+        let tampered_prod = format!(
+            "pub fn compute() -> u32 {{\n    {val_b}\n}}\n\n#[cfg(test)]\nmod tests {{\n    #[test]\n    fn {test_name}() {{}}\n}}\n"
+        );
+        let rs_path = Path::new("src/lib.rs");
+        prop_assert!(policy.verify_with_syntax(rs_path, &original, &valid_test, &rs_syntax).is_ok());
+        prop_assert!(policy.verify_with_syntax(rs_path, &original, &tampered_prod, &rs_syntax).is_err());
+
+        let py_syntax = python_syntax();
+        let py_orig = format!("def compute():\n    return {val_a}\n");
+        let py_valid = format!("def compute():\n    return {val_a}\n\ndef test_{test_name}():\n    assert compute() == {val_a}\n");
+        let py_tamper = format!("def compute():\n    return {val_b}\n\ndef test_{test_name}():\n    assert True\n");
+        let py_path = Path::new("src/app.py");
+        prop_assert!(policy.verify_with_syntax(py_path, &py_orig, &py_valid, &py_syntax).is_ok());
+        prop_assert!(policy.verify_with_syntax(py_path, &py_orig, &py_tamper, &py_syntax).is_err());
+    }
 }
 
 #[test]

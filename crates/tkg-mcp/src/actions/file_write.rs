@@ -406,4 +406,170 @@ filter = "comments_only"
             .is_err()
         );
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+        use serde_json::json;
+
+        use super::*;
+
+        struct TempDirGuard(std::path::PathBuf);
+        impl Drop for TempDirGuard {
+            fn drop(&mut self) {
+                _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(48))]
+
+            #[test]
+            fn prop_file_write_rejects_arbitrary_outside_and_traversal_paths(
+                dir_prefix in prop_oneof![
+                    Just("src_extra".to_owned()),
+                    Just("src2".to_owned()),
+                    Just("tests".to_owned()),
+                    Just("docs".to_owned()),
+                    Just("..".to_owned()),
+                    Just("src/../tests".to_owned()),
+                    "[a-rt-z]{1,6}[0-9]{1,3}",
+                ],
+                file_stem in "[a-zA-Z0-9_]{1,12}",
+                ext in prop_oneof![Just("rs"), Just("txt"), Just("md")],
+                content in "[a-zA-Z0-9 _\n]{0,80}",
+            ) {
+                let temp = create_test_dir("prop-confine");
+                let _cleanup = TempDirGuard(temp.clone());
+
+                let tool = ToolDefinition {
+                    name: "write_file".to_owned(),
+                    allowed_directories: vec!["src".to_owned()],
+                    sandbox: crate::models::ToolSandboxPolicy {
+                        enforce_workspace_bounds: true,
+                        ban_dangerous_files: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let guards = BTreeMap::new();
+
+                let outside_rel = format!("{dir_prefix}/{file_stem}.{ext}");
+
+                // Case 1: Traversal / outside-prefix escapes must fail closed without
+                // creating any file outside `src/`.
+                if dir_prefix.contains("..") {
+                    let trav_args = json!({ "path": outside_rel, "content": content });
+                    prop_assert!(execute(&tool, &temp, &trav_args, None, &guards).is_err());
+                } else {
+                    // When the outside directory exists on disk, writes to it MUST be rejected.
+                    let existing_outside_dir = temp.join(&dir_prefix);
+                    std::fs::create_dir_all(&existing_outside_dir).expect("create outside dir");
+                    let seeded_args = json!({ "path": outside_rel, "content": content });
+                    let res = execute(&tool, &temp, &seeded_args, None, &guards);
+                    prop_assert!(res.is_err());
+                    prop_assert!(!temp.join(&outside_rel).exists());
+
+                    // Even for a non-existent relative prefix not yet on disk, any write
+                    // either fails or anchors strictly inside `src/`, never at workspace root.
+                    let unseeded_rel = format!("unseeded_{outside_rel}");
+                    let unseeded_args = json!({ "path": unseeded_rel, "content": content });
+                    drop(execute(&tool, &temp, &unseeded_args, None, &guards));
+                    prop_assert!(!temp.join(&unseeded_rel).exists());
+                }
+
+                // Explicit traversal for scoped worker must also fail closed and never escape `src`.
+                let worker_guards = BTreeMap::from([(
+                    "worker".to_owned(),
+                    AgentGuard {
+                        allowed_dirs: vec!["src".to_owned()],
+                        ..Default::default()
+                    },
+                )]);
+                let trav_path = format!("../{file_stem}.{ext}");
+                let trav_args = json!({ "path": trav_path, "content": "escape" });
+                prop_assert!(execute(&tool, &temp, &trav_args, Some("worker"), &worker_guards).is_err());
+
+                let abs_path = format!("/tmp/{file_stem}.{ext}");
+                let abs_args = json!({ "path": abs_path, "content": "escape" });
+                prop_assert!(execute(&tool, &temp, &abs_args, Some("worker"), &worker_guards).is_err());
+            }
+
+            #[test]
+            fn prop_file_write_rejects_arbitrary_sensitive_files(
+                prefix in prop_oneof![Just(""), Just("src/"), Just("src/nested/")],
+                env_suffix in "[a-zA-Z0-9_]{0,10}",
+                use_env in proptest::bool::ANY,
+            ) {
+                let temp = create_test_dir("prop-danger");
+                let _cleanup = TempDirGuard(temp.clone());
+
+                let tool = ToolDefinition {
+                    name: "write_file".to_owned(),
+                    allowed_directories: vec!["src".to_owned()],
+                    sandbox: crate::models::ToolSandboxPolicy {
+                        enforce_workspace_bounds: true,
+                        ban_dangerous_files: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let filename = if use_env {
+                    if env_suffix.is_empty() {
+                        ".env".to_owned()
+                    } else {
+                        format!(".env.{env_suffix}")
+                    }
+                } else if env_suffix.is_empty() {
+                    "id_rsa".to_owned()
+                } else {
+                    format!("{env_suffix}.pem")
+                };
+                let rel_path = format!("{prefix}{filename}");
+                let args = json!({ "path": rel_path, "content": "SECRET=abc" });
+                let guards = BTreeMap::new();
+                let res = execute(&tool, &temp, &args, None, &guards);
+                prop_assert!(res.is_err());
+            }
+
+            #[test]
+            fn prop_file_write_comments_policy_allows_comments_blocks_tamper(
+                comment_text in "[a-zA-Z0-9 _,.:;-]{1,40}",
+                delta in 1i32..500,
+            ) {
+                let temp = create_test_dir("prop-comments");
+                let _cleanup = TempDirGuard(temp.clone());
+
+                let src_dir = temp.join("src");
+                std::fs::create_dir_all(&src_dir).expect("create src");
+                let original = "pub fn add(a: i32, b: i32) -> i32 { a + b }";
+                let file_path = src_dir.join("lib.rs");
+                std::fs::write(&file_path, original).expect("seed lib.rs");
+
+                let tool = ToolDefinition {
+                    name: "write_file".to_owned(),
+                    allowed_directories: vec!["src".to_owned()],
+                    ..Default::default()
+                };
+                let guards = BTreeMap::from([(
+                    "comments_agent".to_owned(),
+                    AgentGuard {
+                        allowed_dirs: vec!["src".to_owned()],
+                        path_policies: vec![tkg_common::PathPolicy::comments_only("src")],
+                        ..Default::default()
+                    },
+                )]);
+
+                let valid_content = format!("// {comment_text}\n{original}");
+                let valid_args = json!({ "path": "src/lib.rs", "content": valid_content });
+                prop_assert!(execute(&tool, &temp, &valid_args, Some("comments_agent"), &guards).is_ok());
+
+                let tampered_content = format!("pub fn add(a: i32, b: i32) -> i32 {{ a + b + {delta} }}");
+                let tampered_args = json!({ "path": "src/lib.rs", "content": tampered_content });
+                prop_assert!(execute(&tool, &temp, &tampered_args, Some("comments_agent"), &guards).is_err());
+
+                let persisted = std::fs::read_to_string(&file_path).expect("read lib.rs");
+                prop_assert_eq!(persisted, valid_content);
+            }
+        }
+    }
 }

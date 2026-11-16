@@ -553,4 +553,106 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
 
         _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(48))]
+
+            #[test]
+            fn prop_pre_tool_use_confines_arbitrary_paths_to_allowed_dir_and_blocks_tamper(
+                allowed_dir in "[a-z]{2,8}",
+                arbitrary_path in "[a-zA-Z0-9_./-]{1,35}",
+                mutator_tool in prop_oneof![
+                    Just("edit_file"),
+                    Just("write_file"),
+                    Just("custom_writer"),
+                ],
+                tamper_delta in 1u32..500,
+            ) {
+                let dir = std::env::temp_dir().join(format!(
+                    "tkg_ptu_prop_{}_{}",
+                    std::process::id(),
+                    tamper_delta
+                ));
+                _ = std::fs::remove_dir_all(&dir);
+                std::fs::create_dir_all(dir.join("plugins/torqkage/agents")).expect("mkdir agents");
+                std::fs::create_dir_all(dir.join(&allowed_dir)).expect("mkdir allowed");
+
+                let manifest = format!(
+                    "---\nname: strict_doc_agent\nallowed_dirs:\n  - {allowed_dir}\npath_policies:\n  - path: {allowed_dir}\n    filter: comments_only\n---\n"
+                );
+                std::fs::write(
+                    dir.join("plugins/torqkage/agents/strict_doc_agent.md"),
+                    manifest,
+                )
+                .expect("write manifest");
+
+                let lib_path = dir.join(&allowed_dir).join("lib.rs");
+                std::fs::write(&lib_path, "pub fn answer() -> u32 {\n    42\n}\n")
+                    .expect("write lib.rs");
+
+                let config = HooksConfig::default();
+
+                // 1. Prefix-lookalike path (`<allowed_dir>_extra/x.rs`) must ALWAYS be denied.
+                let prefix_lookalike = format!("{allowed_dir}_extra/x.rs");
+                let lookalike_input = PreToolUseInput {
+                    tool_call: Some(ToolCallPayload {
+                        name: mutator_tool.to_owned(),
+                        args: json!({ "path": prefix_lookalike, "content": "// ok" }),
+                    }),
+                    common: tkg_common::models::CommonHookPayload {
+                        model_name: Some("strict_doc_agent".to_owned()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let lookalike_res = evaluate_pre_tool_use(&lookalike_input, &dir, &config);
+                prop_assert_ne!(lookalike_res.decision, HookDecision::Allow);
+
+                // 2. Arbitrary path must never return Allow unless cleanly scoped inside `allowed_dir`.
+                let arb_input = PreToolUseInput {
+                    tool_call: Some(ToolCallPayload {
+                        name: mutator_tool.to_owned(),
+                        args: json!({ "path": arbitrary_path, "content": "// comment" }),
+                    }),
+                    common: tkg_common::models::CommonHookPayload {
+                        model_name: Some("strict_doc_agent".to_owned()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let arb_res = evaluate_pre_tool_use(&arb_input, &dir, &config);
+                let in_scope = tkg_common::matches_directory_scope(&arbitrary_path, &allowed_dir);
+                if !in_scope {
+                    prop_assert_ne!(arb_res.decision, HookDecision::Allow);
+                }
+
+                // 3. Code modification inside `allowed_dir/lib.rs` must ALWAYS be denied.
+                let new_val = 42u32.saturating_add(tamper_delta);
+                let tamper_input = PreToolUseInput {
+                    tool_call: Some(ToolCallPayload {
+                        name: "edit_file".to_owned(),
+                        args: json!({
+                            "path": format!("{allowed_dir}/lib.rs"),
+                            "target": "42",
+                            "replacement": new_val.to_string(),
+                        }),
+                    }),
+                    common: tkg_common::models::CommonHookPayload {
+                        model_name: Some("strict_doc_agent".to_owned()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let tamper_res = evaluate_pre_tool_use(&tamper_input, &dir, &config);
+                prop_assert_eq!(tamper_res.decision, HookDecision::Deny);
+
+                _ = std::fs::remove_dir_all(&dir);
+            }
+        }
+    }
 }

@@ -239,4 +239,126 @@ mod tests {
 
         _ = std::fs::remove_dir_all(&temp);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+        use serde_json::json;
+
+        use super::*;
+
+        struct TempDirGuard(std::path::PathBuf);
+        impl Drop for TempDirGuard {
+            fn drop(&mut self) {
+                _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(48))]
+
+            #[test]
+            fn prop_file_read_line_slicing_and_inverted_bounds(
+                lines in proptest::collection::vec("[a-zA-Z0-9 _-]{1,24}", 1..20),
+                start in 1u64..25,
+                end in 1u64..25,
+            ) {
+                let dir_id = format!(
+                    "tkg_read_prop_{}_{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock")
+                        .as_nanos()
+                );
+                let temp = std::env::temp_dir().join(dir_id);
+                std::fs::create_dir_all(&temp).expect("create temp");
+                let _cleanup = TempDirGuard(temp.clone());
+
+                let body = lines.join("\n");
+                let file_path = temp.join("sample.txt");
+                std::fs::write(&file_path, &body).expect("write sample");
+
+                let tool = ToolDefinition {
+                    name: "file_read".to_owned(),
+                    ..Default::default()
+                };
+                let guards = BTreeMap::new();
+                let args = json!({
+                    "path": "sample.txt",
+                    "start_line": start,
+                    "end_line": end,
+                });
+
+                let res = execute(&tool, &temp, &args, None, &guards);
+                if start > end {
+                    let err = res.expect_err("inverted bounds must error");
+                    prop_assert!(err.contains("Invalid line range"));
+                } else {
+                    let out = res.expect("valid range must succeed");
+                    let len = lines.len();
+                    let lo = usize::try_from(start).unwrap_or(1).saturating_sub(1).min(len);
+                    let hi = usize::try_from(end).unwrap_or(len).min(len);
+                    let expected = if lo < hi {
+                        lines[lo..hi].join("\n")
+                    } else {
+                        String::new()
+                    };
+                    prop_assert_eq!(out, expected);
+                }
+            }
+
+            #[test]
+            fn prop_file_read_rejects_arbitrary_paths_outside_allowed_dir(
+                dir_prefix in prop_oneof![
+                    Just("src_extra".to_owned()),
+                    Just("src2".to_owned()),
+                    Just("tests".to_owned()),
+                    Just("..".to_owned()),
+                    Just("src/../tests".to_owned()),
+                    "[a-rt-z]{1,6}[0-9]{1,3}",
+                ],
+                file_name in "[a-zA-Z0-9_]{1,12}\\.rs",
+                use_abs in proptest::bool::ANY,
+            ) {
+                let dir_id = format!(
+                    "tkg_read_confine_{}_{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock")
+                        .as_nanos()
+                );
+                let temp = std::env::temp_dir().join(dir_id);
+                std::fs::create_dir_all(&temp).expect("create temp");
+                let _cleanup = TempDirGuard(temp.clone());
+
+                let tool = ToolDefinition {
+                    name: "read_file".to_owned(),
+                    allowed_directories: vec!["src".to_owned()],
+                    sandbox: crate::models::ToolSandboxPolicy {
+                        enforce_workspace_bounds: true,
+                        ban_dangerous_files: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let guards = BTreeMap::new();
+                let target = if use_abs {
+                    format!("/{dir_prefix}/{file_name}")
+                } else {
+                    if !dir_prefix.contains("..") {
+                        let outside_file = temp.join(&dir_prefix).join(&file_name);
+                        std::fs::create_dir_all(outside_file.parent().expect("parent"))
+                            .expect("create outside dir");
+                        std::fs::write(&outside_file, "SECRET_OUTSIDE_SRC")
+                            .expect("seed outside file");
+                    }
+                    format!("{dir_prefix}/{file_name}")
+                };
+                let args = json!({ "path": target });
+                let res = execute(&tool, &temp, &args, None, &guards);
+                prop_assert!(res.is_err());
+            }
+        }
+    }
 }

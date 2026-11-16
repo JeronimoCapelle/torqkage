@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a04524c9a17f86d51d95d7e8d31b6986c5e1afeb58e1aadc525addc7a17fb9e2 # shrinks to method = "tools/call", tool_name = "_", raw_path = "Cargo.toml", call_id = 1

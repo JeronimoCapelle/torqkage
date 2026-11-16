@@ -1664,4 +1664,97 @@ mod tests {
         let fourth = run_init(dir.path(), &custom_args).expect("custom template init");
         assert_eq!(fourth.seeded_tools, vec!["custom_lint"]);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_init_uninstall_roundtrip_across_workspace_harnesses(
+                harness_slug in prop_oneof![
+                    Just("claude"),
+                    Just("codex"),
+                    Just("gemini"),
+                    Just("cursor"),
+                    Just("github-copilot"),
+                    Just("vscode"),
+                    Just("opencode"),
+                    Just("roo"),
+                ],
+            ) {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let init_args = parse_init_args(&vec_args(&[harness_slug])).expect("init args");
+                let init_res = run_init(dir.path(), &init_args);
+                prop_assert!(init_res.is_ok(), "init failed: {init_res:?}");
+
+                let uninstall_args = parse_uninstall_args(&vec_args(&[])).expect("uninstall args");
+                let uninstall_res = run_uninstall(dir.path(), &uninstall_args);
+                prop_assert!(uninstall_res.is_ok(), "uninstall failed: {uninstall_res:?}");
+                if let Ok(outcome) = uninstall_res {
+                    prop_assert!(!outcome.actions.is_empty());
+                }
+
+                // Zero leftover TorqKage artifacts on a clean repository.
+                let leftover_count = fs::read_dir(dir.path()).expect("read_dir").count();
+                prop_assert_eq!(leftover_count, 0);
+            }
+
+            #[test]
+            fn prop_add_tool_escapes_toml_and_rejects_bad_names(
+                valid_name in "[a-z][a-z0-9_-]{1,18}",
+                bad_char in prop_oneof![Just(" "), Just("."), Just("/"), Just(";"), Just("=")],
+                description in "[a-zA-Z0-9 #\"\\\\_-]{0,60}",
+                cmd_args in prop::collection::vec("[a-zA-Z0-9_./:-]{1,15}", 1..5),
+            ) {
+                let dir = tempfile::tempdir().expect("tempdir");
+                fs::create_dir_all(dir.path().join(".tkg")).expect("mkdir .tkg");
+                let tools_path = dir.path().join(".tkg/tools.toml");
+                fs::write(&tools_path, "# keep this comment\n").expect("write comment");
+
+                let add_args = AddToolArgs {
+                    name: valid_name.clone(),
+                    command: cmd_args,
+                    description: Some(description),
+                    category: "custom".to_owned(),
+                    mutating: false,
+                    enforce_sandbox: true,
+                    tracks_circuit_breaker: true,
+                };
+                let ok_write = run_add_tool(dir.path(), &add_args);
+                prop_assert!(ok_write.is_ok(), "valid add failed: {ok_write:?}");
+
+                let rendered = fs::read_to_string(&tools_path).expect("read tools.toml");
+                prop_assert!(rendered.contains("# keep this comment"));
+                let section_header = format!("[tools.{valid_name}]");
+                let has_section = rendered.contains(&section_header);
+                prop_assert!(has_section);
+                let parsed: Result<RawToolsConfig, _> = toml::from_str(&rendered);
+                prop_assert!(parsed.is_ok());
+
+                // Any invalid character in tool name must be rejected cleanly.
+                let bad_name = format!("{valid_name}{bad_char}tail");
+                let mut raw_bad = vec![bad_name, "--".to_owned(), "echo".to_owned()];
+                let bad_parsed = parse_add_args(&raw_bad);
+                if let Ok(parsed_add) = bad_parsed {
+                    let bad_res = run_add_tool(dir.path(), &parsed_add);
+                    prop_assert!(bad_res.is_err());
+                } else {
+                    prop_assert!(bad_parsed.is_err());
+                }
+                raw_bad.clear();
+            }
+
+            #[test]
+            fn prop_cli_parsers_never_panic_on_arbitrary_args(
+                raw_args in prop::collection::vec("\\PC{0,30}", 0..12),
+            ) {
+                _ = parse_init_args(&raw_args);
+                _ = parse_doctor_args(&raw_args);
+                _ = parse_add_args(&raw_args);
+                _ = parse_uninstall_args(&raw_args);
+            }
+        }
+    }
 }

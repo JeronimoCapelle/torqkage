@@ -2856,6 +2856,7 @@ name = "torqkage"
 version = "0.1.7"
 dependencies = [
  "crossterm",
+ "proptest",
  "ratatui",
  "tempfile",
  "thiserror 2.0.21",
