@@ -592,20 +592,16 @@ impl CircuitBreakerLedger {
         self.save(workspace_root)
     }
 
-    /// Records a failed compilation or verification attempt.
-    /// Increments consecutive failures and trips the breaker if `failures >=
-    /// max_strikes`.
-    ///
-    /// # Errors
-    /// Returns `io::Error` if saving fails.
-    pub fn record_failure(
+    /// Records a failed compilation or verification attempt in memory,
+    /// incrementing consecutive failures and tripping the breaker once
+    /// `failures >= max_strikes`.
+    pub fn record_failure_in_memory(
         &mut self,
-        workspace_root: &Path,
         agent: Option<&str>,
         tool_name: Option<&str>,
         error_sig: Option<&str>,
         error_details: Option<&str>,
-    ) -> std::io::Result<()> {
+    ) {
         if let Some(a) = agent {
             a.clone_into(&mut self.agent);
         }
@@ -623,6 +619,22 @@ impl CircuitBreakerLedger {
         });
         self.last_tool = tool_name.map(ToOwned::to_owned);
         self.last_updated = format!("{}", jiff::Timestamp::now());
+    }
+
+    /// Records a failed compilation or verification attempt and saves the
+    /// ledger to `.tkg/state/circuit_breaker.json`.
+    ///
+    /// # Errors
+    /// Returns `io::Error` if saving fails.
+    pub fn record_failure(
+        &mut self,
+        workspace_root: &Path,
+        agent: Option<&str>,
+        tool_name: Option<&str>,
+        error_sig: Option<&str>,
+        error_details: Option<&str>,
+    ) -> std::io::Result<()> {
+        self.record_failure_in_memory(agent, tool_name, error_sig, error_details);
         self.save(workspace_root)
     }
 

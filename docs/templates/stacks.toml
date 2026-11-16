@@ -1,0 +1,63 @@
+# External stack auto-detection map and environment-pruning rules for `tkg init --with-tools`.
+# Edit this file or the referenced `tools.toml` files without recompiling `tkg`.
+
+[[stack]]
+id = "rust"
+markers = ["Cargo.toml"]
+tools = "rust/tools.toml"
+
+[[stack]]
+id = "typescript"
+markers = ["package.json", "tsconfig.json"]
+tools = "typescript/tools.toml"
+
+[[stack]]
+id = "python"
+markers = ["pyproject.toml", "requirements.txt"]
+tools = "python/tools.toml"
+
+[[stack]]
+id = "go"
+markers = ["go.mod"]
+tools = "go/tools.toml"
+
+# Optional per-tool environment & repo-marker preconditions checked during `tkg init --with-tools`
+# (pass `--all-tools` to bypass pruning and seed every tool in the template).
+[rules.vitest_run]
+requires_bins = ["pnpm", "vitest"]
+requires_any_file = ["pnpm-lock.yaml"]
+
+[rules.tsc_check]
+requires_bins = ["pnpm", "tsc"]
+requires_any_file = ["tsconfig.json"]
+
+[rules.eslint_check]
+requires_bins = ["pnpm", "eslint"]
+
+[rules.npm_test]
+requires_bins = ["npm"]
+requires_any_file = ["package-lock.json", "package.json"]
+
+[rules.bun_test]
+requires_bins = ["bun"]
+requires_any_file = ["bun.lock", "bun.lockb"]
+
+[rules.biome_check]
+requires_bins = ["biome"]
+requires_any_file = ["biome.json", "biome.jsonc"]
+
+[rules.playwright_test]
+requires_bins = ["playwright"]
+requires_any_file = ["playwright.config.ts", "playwright.config.mjs", "playwright.config.js"]
+
+[rules.pytest_run]
+requires_bins = ["uv"]
+
+[rules.mypy_check]
+requires_bins = ["uv"]
+
+[rules.ruff_fix]
+requires_bins = ["uv"]
+
+[rules.go_migrate]
+requires_any_file = ["migrations"]

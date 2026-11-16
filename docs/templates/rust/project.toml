@@ -9,16 +9,10 @@ version = "0.1.0"
 
 [workspace]
 containers = ["crates", "src"]
-ignored_paths = [
-    "target",
-    ".tkg/state",
-    ".tkg/workspaces",
-]
+ignored_paths = ["target", ".tkg/state", ".tkg/workspaces"]
 
 [sandbox]
-bind_mounts = [
-    "target",
-]
+bind_mounts = ["target"]
 
 [gates.compilation]
 command = ["cargo", "check", "--workspace", "--all-targets"]

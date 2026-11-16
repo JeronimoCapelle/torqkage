@@ -4,13 +4,23 @@
 use std::path::Path;
 
 use proptest::prelude::*;
+use serde_json::json;
 use tkg_common::{
-    AgentFrontmatter, BlockCommentDelimiters, PathPolicy, SyntaxConfig,
-    check_dangerous_files_with_security,
+    AgentFrontmatter, AgentGuard, BlockCommentDelimiters, CircuitBreakerLedger,
+    DEFAULT_PROTECTED_MANIFESTS, HookDecision, PathPolicy, PreToolResponse, SyntaxConfig,
+    check_dangerous_files_with_security, check_manifest_protection, extract_candidate_paths,
     harness::{Antigravity, ClaudeCode, OpenCode},
+    hook_dialect::{
+        ClaudeCodeDialect, CursorDialect, GeminiCliDialect, GithubCopilotDialect, HookDialect,
+        ProtoJsonDialect, detect_payload_dialect,
+    },
+    is_manifest_protected, matches_directory_scope,
     models::extract_compiler_error_signature,
+    path_matches_pattern,
+    project::parse_project_toml,
     strip_comments_and_normalize_with_syntax, strip_delimited, strip_delimited_and_normalize,
     strip_tests_and_normalize_with_syntax,
+    tools::{RawToolsConfig, resolve as resolve_tools},
 };
 
 fn rust_syntax() -> SyntaxConfig {
@@ -128,6 +138,117 @@ proptest! {
         _ = extract_compiler_error_signature(&raw, None);
         _ = check_dangerous_files_with_security(Path::new(&raw), None);
         _ = strip_delimited_and_normalize(&raw, "/*", "*/");
+        _ = parse_project_toml(&raw);
+        let raw_tools = RawToolsConfig::from_toml_str(&raw);
+        _ = resolve_tools(&raw_tools);
+        _ = path_matches_pattern(&raw, "src/**/*.rs");
+    }
+
+    #[test]
+    fn prop_manifest_guard_catches_all_protected_variants(
+        prefix in prop::collection::vec("[a-z0-9_]{1,8}", 0..4),
+        manifest_idx in 0usize..DEFAULT_PROTECTED_MANIFESTS.len(),
+        flip_case in any::<bool>(),
+        key_name in prop_oneof![Just("path"), Just("file_path"), Just("target_file")],
+    ) {
+        let base = DEFAULT_PROTECTED_MANIFESTS.get(manifest_idx).copied().unwrap_or("Cargo.toml");
+        let target_name = if flip_case {
+            base.to_ascii_uppercase()
+        } else {
+            base.to_owned()
+        };
+        let rel = if prefix.is_empty() {
+            target_name
+        } else {
+            format!("{}/{}", prefix.join("/"), target_name)
+        };
+        let payload = json!({ key_name: rel, "nested": [{ "path": "src/lib.rs" }] });
+        let extracted = extract_candidate_paths(&payload);
+        prop_assert!(extracted.iter().any(|p| p == &rel));
+        prop_assert!(is_manifest_protected(&rel, &[]));
+
+        let restrictive_guard = AgentGuard {
+            allowed_files: vec!["src/*.rs".to_owned()],
+            ..Default::default()
+        };
+        prop_assert!(
+            check_manifest_protection(Path::new(&rel), Some("coder"), Some(&restrictive_guard))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn prop_directory_scope_rejects_traversal_and_accepts_subpaths(
+        allowed_dir in "[a-z]{2,8}",
+        sub in "[a-z0-9_]{1,8}",
+        file in "[a-z0-9_]{1,8}\\.rs",
+    ) {
+        let inside_rel = format!("{allowed_dir}/{sub}/{file}");
+        let other_rel = format!("other_{inside_rel}");
+        prop_assert!(matches_directory_scope(&inside_rel, &allowed_dir));
+        prop_assert!(!matches_directory_scope(&other_rel, &allowed_dir));
+
+        let ws = Path::new("/tmp/tkg_prop_scope_ws");
+        let guard = AgentGuard {
+            allowed_dirs: vec![allowed_dir],
+            ..Default::default()
+        };
+        let inside = ws.join(&inside_rel);
+        prop_assert!(tkg_common::check_agent_guard_direct(ws, &inside, Some("coder"), Some(&guard)).is_ok());
+
+        let outside = ws.join("forbidden").join(&file);
+        prop_assert!(tkg_common::check_agent_guard_direct(ws, &outside, Some("coder"), Some(&guard)).is_err());
+    }
+
+    #[test]
+    fn prop_circuit_breaker_arithmetic_invariants(
+        max_strikes in 0usize..=10,
+        strikes in 0usize..=25,
+    ) {
+        let mut ledger = CircuitBreakerLedger::new("prop-agent").with_max_strikes(max_strikes);
+        for _ in 0..strikes {
+            ledger.record_failure_in_memory(Some("prop-agent"), Some("test"), Some("ERR"), None);
+        }
+        prop_assert_eq!(ledger.consecutive_failures, strikes);
+        if strikes > 0 {
+            prop_assert_eq!(ledger.tripped, strikes >= max_strikes);
+        } else {
+            prop_assert!(!ledger.tripped);
+        }
+    }
+
+    #[test]
+    fn prop_hook_dialects_never_panic_and_format_decisions(
+        raw in "\\PC{0,256}",
+        reason in "[a-zA-Z0-9 ._-]{0,60}",
+        decision_idx in 0usize..4,
+    ) {
+        _ = detect_payload_dialect(&raw);
+        let decision = match decision_idx {
+            0 => HookDecision::Allow,
+            1 => HookDecision::Ask,
+            2 => HookDecision::Deny,
+            _ => HookDecision::ForceAsk,
+        };
+        let resp = match decision {
+            HookDecision::Allow => PreToolResponse::allow(),
+            HookDecision::Ask | HookDecision::ForceAsk => PreToolResponse::ask(reason),
+            HookDecision::Deny => PreToolResponse::deny(reason),
+        };
+        let dialects: [&dyn HookDialect; 5] = [
+            &ProtoJsonDialect,
+            &ClaudeCodeDialect,
+            &GeminiCliDialect,
+            &CursorDialect,
+            &GithubCopilotDialect,
+        ];
+        for dialect in dialects {
+            _ = dialect.parse_pre_tool_use(&raw);
+            _ = dialect.parse_stop(&raw);
+            _ = dialect.parse_session_start(&raw);
+            let formatted = dialect.format_pre_tool_use(&resp);
+            prop_assert!(formatted.is_ok());
+        }
     }
 }
 

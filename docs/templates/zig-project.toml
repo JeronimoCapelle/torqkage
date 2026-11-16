@@ -9,18 +9,10 @@ version = "0.1.0"
 
 [workspace]
 containers = ["packages", "libs"]
-ignored_paths = [
-    ".zig-cache",
-    "zig-out",
-    ".tkg/state",
-    ".tkg/workspaces",
-]
+ignored_paths = [".zig-cache", "zig-out", ".tkg/state", ".tkg/workspaces"]
 
 [sandbox]
-bind_mounts = [
-    ".zig-cache",
-    "zig-out",
-]
+bind_mounts = [".zig-cache", "zig-out"]
 
 [gates.compilation]
 command = ["zig", "build", "check"]

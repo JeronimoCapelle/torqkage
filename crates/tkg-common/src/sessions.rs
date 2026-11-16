@@ -1,5 +1,6 @@
-//! Multi-harness conversation session discovery across SQLite (`agy`),
-//! Claude Code JSONL transcripts, `OpenCode` JSON files, and
+//! Multi-harness conversation session discovery across `SQLite` (`agy`),
+//! Claude Code JSONL transcripts, `OpenAI` Codex CLI rollouts, Google Gemini
+//! CLI chats, Cursor transcripts, `OpenCode` JSON files, and
 //! `.tkg/state/sessions`.
 
 use std::path::{Path, PathBuf};
@@ -90,6 +91,72 @@ pub fn discover_generic_state_sessions(
     discover_json_sessions_in_dirs(&dirs, agent_name)
 }
 
+fn file_mtime_string(path: &Path) -> String {
+    path.metadata()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map_or_else(
+            || "1970-01-01T00:00:00Z".to_owned(),
+            |t| {
+                t.duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .to_string()
+            },
+        )
+}
+
+fn file_stem_or_unknown(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_owned()
+}
+
+fn canonicalize_or_self(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn workspace_matches_path(candidate: &str, canonical_ws: &Path, raw_ws: &Path) -> bool {
+    let candidate_path = Path::new(candidate);
+    let candidate_canon = canonicalize_or_self(candidate_path);
+    candidate_canon == canonical_ws || candidate_path == raw_ws
+}
+
+fn truncate_preview(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.chars().take(80).collect())
+    }
+}
+
+fn collect_files_with_ext(root: &Path, ext: &str, max_depth: usize) -> Vec<PathBuf> {
+    let mut results = Vec::new();
+    let mut stack = vec![(root.to_path_buf(), 0_usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if ft.is_dir() && depth < max_depth {
+                stack.push((path, depth + 1));
+            } else if ft.is_file() && path.extension().is_some_and(|e| e == ext) {
+                results.push(path);
+            }
+        }
+    }
+    results
+}
+
 fn encode_claude_project_slug(path: &Path, normalize_punct: bool) -> String {
     let raw = path.to_string_lossy();
     let stripped = raw.strip_prefix(r"\\?\").unwrap_or(&raw);
@@ -108,18 +175,14 @@ fn encode_claude_project_slug(path: &Path, normalize_punct: bool) -> String {
 fn extract_claude_message_text(val: &serde_json::Value) -> Option<String> {
     let content = val.get("message").and_then(|m| m.get("content"))?;
     if let Some(s) = content.as_str() {
-        let trimmed = s.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.chars().take(80).collect());
-        }
+        return truncate_preview(s);
     }
     if let Some(arr) = content.as_array() {
         for item in arr {
-            if let Some(text) = item.get("text").and_then(serde_json::Value::as_str) {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    return Some(trimmed.chars().take(80).collect());
-                }
+            if let Some(text) = item.get("text").and_then(serde_json::Value::as_str)
+                && let Some(preview) = truncate_preview(text)
+            {
+                return Some(preview);
             }
         }
     }
@@ -149,14 +212,10 @@ fn parse_claude_jsonl_session(
             continue;
         };
 
-        if let Some(cwd_str) = val.get("cwd").and_then(serde_json::Value::as_str) {
-            let cwd_path = Path::new(cwd_str);
-            let cwd_canon = cwd_path
-                .canonicalize()
-                .unwrap_or_else(|_| cwd_path.to_path_buf());
-            if cwd_canon != canonical_ws && cwd_path != raw_ws {
-                return None;
-            }
+        if let Some(cwd_str) = val.get("cwd").and_then(serde_json::Value::as_str)
+            && !workspace_matches_path(cwd_str, canonical_ws, raw_ws)
+        {
+            return None;
         }
 
         if let Some(sid) = val
@@ -191,10 +250,9 @@ fn parse_claude_jsonl_session(
             if let Some(s) = val
                 .get("summary")
                 .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
+                .and_then(truncate_preview)
             {
-                summary_preview = Some(s.chars().take(80).collect());
+                summary_preview = Some(s);
             }
         } else if matches!(entry_type, Some("user" | "assistant")) {
             step_count += 1;
@@ -214,33 +272,11 @@ fn parse_claude_jsonl_session(
         return None;
     }
 
-    let conversation_id = session_id.unwrap_or_else(|| {
-        path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_owned()
-    });
-
-    let last_modified_time = last_timestamp.unwrap_or_else(|| {
-        path.metadata()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .map_or_else(
-                || "1970-01-01T00:00:00Z".to_owned(),
-                |t| {
-                    t.duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs()
-                        .to_string()
-                },
-            )
-    });
-
     Some(SessionMeta {
-        conversation_id,
+        conversation_id: session_id.unwrap_or_else(|| file_stem_or_unknown(path)),
         agent_name: agent_name.to_owned(),
         workspace_uris: canonical_ws.to_string_lossy().into_owned(),
-        last_modified_time,
+        last_modified_time: last_timestamp.unwrap_or_else(|| file_mtime_string(path)),
         step_count,
         preview: summary_preview.or(user_preview).unwrap_or_default(),
     })
@@ -257,9 +293,7 @@ pub fn discover_claude_sessions_in(
     if !projects_dir.is_dir() {
         return Vec::new();
     }
-    let canonical = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let canonical = canonicalize_or_self(workspace_root);
     let mut candidate_dirs = Vec::new();
     for base in [&canonical, workspace_root] {
         for normalize_punct in [false, true] {
@@ -286,6 +320,337 @@ pub fn discover_claude_sessions_in(
         }
     }
 
+    sessions.sort_by(|a, b| b.last_modified_time.cmp(&a.last_modified_time));
+    sessions
+}
+
+fn parse_codex_rollout_session(
+    path: &Path,
+    agent_name: &str,
+    canonical_ws: &Path,
+    raw_ws: &Path,
+) -> Option<SessionMeta> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut session_id: Option<String> = None;
+    let mut last_timestamp: Option<String> = None;
+    let mut preview: Option<String> = None;
+    let mut matched_workspace = false;
+    let mut step_count: u64 = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+
+        if let Some(ts) = val
+            .get("timestamp")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        {
+            last_timestamp = Some(ts.to_owned());
+        }
+
+        let entry_type = val.get("type").and_then(serde_json::Value::as_str);
+        let payload = val.get("payload");
+        if entry_type == Some("session_meta")
+            && let Some(p) = payload
+        {
+            if let Some(cwd_str) = p.get("cwd").and_then(serde_json::Value::as_str) {
+                if !workspace_matches_path(cwd_str, canonical_ws, raw_ws) {
+                    return None;
+                }
+                matched_workspace = true;
+            }
+            if let Some(id) = p
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+            {
+                session_id = Some(id.to_owned());
+            }
+        } else if matches!(entry_type, Some("event_msg" | "response_item")) {
+            step_count += 1;
+            if preview.is_none()
+                && let Some(p) = payload
+            {
+                if p.get("type").and_then(serde_json::Value::as_str) == Some("user_message")
+                    && let Some(msg) = p.get("message").and_then(serde_json::Value::as_str)
+                {
+                    preview = truncate_preview(msg);
+                } else if p.get("role").and_then(serde_json::Value::as_str) == Some("user")
+                    && let Some(arr) = p.get("content").and_then(serde_json::Value::as_array)
+                {
+                    for item in arr {
+                        if let Some(text) = item.get("text").and_then(serde_json::Value::as_str)
+                            && let Some(p_text) = truncate_preview(text)
+                        {
+                            preview = Some(p_text);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !matched_workspace || step_count == 0 {
+        return None;
+    }
+
+    Some(SessionMeta {
+        conversation_id: session_id.unwrap_or_else(|| file_stem_or_unknown(path)),
+        agent_name: agent_name.to_owned(),
+        workspace_uris: canonical_ws.to_string_lossy().into_owned(),
+        last_modified_time: last_timestamp.unwrap_or_else(|| file_mtime_string(path)),
+        step_count,
+        preview: preview.unwrap_or_default(),
+    })
+}
+
+/// Discovers `OpenAI` Codex CLI rollout JSONL sessions under `sessions_dir`
+/// (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`), sorted newest first.
+#[must_use]
+pub fn discover_codex_sessions_in(
+    sessions_dir: &Path,
+    agent_name: &str,
+    workspace_root: &Path,
+) -> Vec<SessionMeta> {
+    if !sessions_dir.is_dir() {
+        return Vec::new();
+    }
+    let canonical = canonicalize_or_self(workspace_root);
+    let mut sessions: Vec<_> = collect_files_with_ext(sessions_dir, "jsonl", 5)
+        .into_iter()
+        .filter_map(|p| parse_codex_rollout_session(&p, agent_name, &canonical, workspace_root))
+        .collect();
+    sessions.sort_by(|a, b| b.last_modified_time.cmp(&a.last_modified_time));
+    sessions
+}
+
+fn format_timestamp_value(val: &serde_json::Value) -> Option<String> {
+    if let Some(s) = val.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    } else if let Some(n) = val.as_u64() {
+        return Some(n.to_string());
+    }
+    None
+}
+
+fn parse_cursor_jsonl_session(
+    path: &Path,
+    agent_name: &str,
+    canonical_ws: &Path,
+) -> Option<SessionMeta> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut step_count: u64 = 0;
+    let mut last_timestamp: Option<String> = None;
+    let mut preview: Option<String> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+
+        if let Some(ts) = val.get("timestamp").and_then(format_timestamp_value) {
+            last_timestamp = Some(ts);
+        }
+
+        let role = val.get("role").and_then(serde_json::Value::as_str);
+        if matches!(role, Some("user" | "assistant")) {
+            step_count += 1;
+            if role == Some("user") && preview.is_none() {
+                preview = extract_claude_message_text(&val).or_else(|| {
+                    val.get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(truncate_preview)
+                });
+            }
+        }
+    }
+
+    if step_count == 0 {
+        return None;
+    }
+
+    Some(SessionMeta {
+        conversation_id: file_stem_or_unknown(path),
+        agent_name: agent_name.to_owned(),
+        workspace_uris: canonical_ws.to_string_lossy().into_owned(),
+        last_modified_time: last_timestamp.unwrap_or_else(|| file_mtime_string(path)),
+        step_count,
+        preview: preview.unwrap_or_default(),
+    })
+}
+
+/// Discovers Cursor JSONL agent transcripts under `projects_dir`
+/// (`~/.cursor/projects/<encoded-workspace>/agent-transcripts/*.jsonl`),
+/// sorted newest first.
+#[must_use]
+pub fn discover_cursor_sessions_in(
+    projects_dir: &Path,
+    agent_name: &str,
+    workspace_root: &Path,
+) -> Vec<SessionMeta> {
+    if !projects_dir.is_dir() {
+        return Vec::new();
+    }
+    let canonical = canonicalize_or_self(workspace_root);
+    let mut candidate_dirs = Vec::new();
+    for base in [&canonical, workspace_root] {
+        for normalize_punct in [false, true] {
+            let raw_slug = encode_claude_project_slug(base, normalize_punct);
+            for slug in [raw_slug.trim_start_matches('-').to_owned(), raw_slug] {
+                let dir = projects_dir.join(slug).join("agent-transcripts");
+                if dir.is_dir() && !candidate_dirs.contains(&dir) {
+                    candidate_dirs.push(dir);
+                }
+            }
+        }
+    }
+
+    let mut sessions = Vec::new();
+    for dir in candidate_dirs {
+        for path in collect_files_with_ext(&dir, "jsonl", 2) {
+            if let Some(sess) = parse_cursor_jsonl_session(&path, agent_name, &canonical) {
+                sessions.push(sess);
+            }
+        }
+    }
+    sessions.sort_by(|a, b| b.last_modified_time.cmp(&a.last_modified_time));
+    sessions
+}
+
+fn parse_gemini_chat_session(
+    path: &Path,
+    agent_name: &str,
+    canonical_ws: &Path,
+    raw_ws: &Path,
+    dir_project_root: Option<&str>,
+) -> Option<SessionMeta> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+    let root_hint = val
+        .get("cwd")
+        .or_else(|| val.get("projectRoot"))
+        .and_then(serde_json::Value::as_str)
+        .or(dir_project_root);
+    let root_str = root_hint?;
+    if !workspace_matches_path(root_str, canonical_ws, raw_ws) {
+        return None;
+    }
+
+    let conversation_id = val
+        .get("sessionId")
+        .or_else(|| val.get("session_id"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map_or_else(|| file_stem_or_unknown(path), ToOwned::to_owned);
+
+    let messages = val.get("messages").and_then(serde_json::Value::as_array)?;
+    let step_count = u64::try_from(messages.len()).unwrap_or(0);
+    if step_count == 0 {
+        return None;
+    }
+
+    let preview = messages
+        .iter()
+        .find(|m| {
+            matches!(
+                m.get("type")
+                    .or_else(|| m.get("role"))
+                    .and_then(serde_json::Value::as_str),
+                Some("user")
+            )
+        })
+        .and_then(|m| {
+            m.get("content")
+                .and_then(serde_json::Value::as_str)
+                .and_then(truncate_preview)
+                .or_else(|| {
+                    m.get("parts")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|parts| {
+                            parts.iter().find_map(|p| {
+                                p.get("text")
+                                    .and_then(serde_json::Value::as_str)
+                                    .and_then(truncate_preview)
+                            })
+                        })
+                })
+        })
+        .unwrap_or_default();
+
+    let last_modified_time = val
+        .get("lastUpdated")
+        .or_else(|| val.get("updatedAt"))
+        .or_else(|| val.get("startTime"))
+        .or_else(|| val.get("timestamp"))
+        .and_then(format_timestamp_value)
+        .unwrap_or_else(|| file_mtime_string(path));
+
+    Some(SessionMeta {
+        conversation_id,
+        agent_name: agent_name.to_owned(),
+        workspace_uris: canonical_ws.to_string_lossy().into_owned(),
+        last_modified_time,
+        step_count,
+        preview,
+    })
+}
+
+/// Discovers Google Gemini CLI JSON sessions under `tmp_dir`
+/// (`~/.gemini/tmp/<project_hash>/chats/session-*.json`), sorted newest first.
+#[must_use]
+pub fn discover_gemini_sessions_in(
+    tmp_dir: &Path,
+    agent_name: &str,
+    workspace_root: &Path,
+) -> Vec<SessionMeta> {
+    if !tmp_dir.is_dir() {
+        return Vec::new();
+    }
+    let canonical = canonicalize_or_self(workspace_root);
+    let mut sessions = Vec::new();
+    let Ok(project_dirs) = std::fs::read_dir(tmp_dir) else {
+        return Vec::new();
+    };
+    for entry in project_dirs.flatten() {
+        let project_dir = entry.path();
+        if !project_dir.is_dir() {
+            continue;
+        }
+        let project_root_hint = std::fs::read_to_string(project_dir.join(".project_root"))
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+        let chats_dir = project_dir.join("chats");
+        if !chats_dir.is_dir() {
+            continue;
+        }
+        for chat_path in collect_files_with_ext(&chats_dir, "json", 1) {
+            if let Some(sess) = parse_gemini_chat_session(
+                &chat_path,
+                agent_name,
+                &canonical,
+                workspace_root,
+                project_root_hint.as_deref(),
+            ) {
+                sessions.push(sess);
+            }
+        }
+    }
     sessions.sort_by(|a, b| b.last_modified_time.cmp(&a.last_modified_time));
     sessions
 }
@@ -940,5 +1305,125 @@ mod tests {
         assert!(!slug.contains(':'));
         assert!(!slug.contains('?'));
         assert_eq!(slug, "C--Users-runner-ws-project");
+    }
+
+    #[test]
+    fn test_discover_codex_sessions_in_filters_workspace() {
+        let temp_dir = std::env::temp_dir().join(format!("tkg_codex_ses_{}", std::process::id()));
+        _ = std::fs::remove_dir_all(&temp_dir);
+        let mock_ws = temp_dir.join("repo_a");
+        let other_ws = temp_dir.join("repo_b");
+        std::fs::create_dir_all(&mock_ws).unwrap();
+        std::fs::create_dir_all(&other_ws).unwrap();
+
+        let day_dir = temp_dir.join("sessions/2026/11/15");
+        std::fs::create_dir_all(&day_dir).unwrap();
+
+        let match_lines = [
+            serde_json::json!({
+                "timestamp": "2026-11-15T12:00:00Z",
+                "type": "session_meta",
+                "payload": { "id": "codex-001", "cwd": mock_ws }
+            })
+            .to_string(),
+            serde_json::json!({
+                "timestamp": "2026-11-15T12:01:00Z",
+                "type": "event_msg",
+                "payload": { "type": "user_message", "message": "Implement Codex integration" }
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        std::fs::write(
+            day_dir.join("rollout-2026-11-15-codex-001.jsonl"),
+            match_lines,
+        )
+        .unwrap();
+
+        let other_lines = serde_json::json!({
+            "timestamp": "2026-11-15T12:02:00Z",
+            "type": "session_meta",
+            "payload": { "id": "codex-002", "cwd": other_ws }
+        })
+        .to_string();
+        std::fs::write(day_dir.join("rollout-other.jsonl"), other_lines).unwrap();
+
+        let sessions = discover_codex_sessions_in(&temp_dir.join("sessions"), "coder", &mock_ws);
+        assert_eq!(sessions.len(), 1);
+        let first = sessions.first().unwrap();
+        assert_eq!(first.conversation_id, "codex-001");
+        assert_eq!(first.preview, "Implement Codex integration");
+        assert_eq!(first.step_count, 1);
+
+        _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_discover_cursor_and_gemini_sessions_in() {
+        let temp_dir = std::env::temp_dir().join(format!("tkg_cur_gem_ses_{}", std::process::id()));
+        _ = std::fs::remove_dir_all(&temp_dir);
+        let mock_ws = temp_dir.join("ws");
+        std::fs::create_dir_all(&mock_ws).unwrap();
+
+        let projects_dir = temp_dir.join("cursor_projects");
+        let raw_slug = encode_claude_project_slug(&mock_ws.canonicalize().unwrap(), true);
+        let cursor_dir = projects_dir
+            .join(raw_slug.trim_start_matches('-'))
+            .join("agent-transcripts");
+        std::fs::create_dir_all(&cursor_dir).unwrap();
+        let cursor_lines = [
+            serde_json::json!({
+                "role": "user",
+                "message": { "content": "Upgrade Cursor support" },
+                "timestamp": 1_747_000_000_u64
+            })
+            .to_string(),
+            serde_json::json!({
+                "role": "assistant",
+                "message": { "content": "Done" },
+                "timestamp": 1_747_000_010_u64
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        std::fs::write(cursor_dir.join("cur-uuid-9.jsonl"), cursor_lines).unwrap();
+
+        let cursor_sessions = discover_cursor_sessions_in(&projects_dir, "coder", &mock_ws);
+        assert_eq!(cursor_sessions.len(), 1);
+        let c0 = cursor_sessions.first().unwrap();
+        assert_eq!(c0.conversation_id, "cur-uuid-9");
+        assert_eq!(c0.step_count, 2);
+        assert_eq!(c0.preview, "Upgrade Cursor support");
+
+        let gem_tmp = temp_dir.join("gemini_tmp");
+        let gem_chats = gem_tmp.join("hash123/chats");
+        std::fs::create_dir_all(&gem_chats).unwrap();
+        std::fs::write(
+            gem_tmp.join("hash123/.project_root"),
+            mock_ws.to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        std::fs::write(
+            gem_chats.join("session-2026-11-15.json"),
+            serde_json::json!({
+                "sessionId": "gem-uuid-7",
+                "lastUpdated": "2026-11-15T14:00:00Z",
+                "messages": [
+                    { "type": "user", "content": "Add Gemini hooks" },
+                    { "type": "gemini", "content": "Adding hooks" }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let gem_sessions = discover_gemini_sessions_in(&gem_tmp, "coder", &mock_ws);
+        assert_eq!(gem_sessions.len(), 1);
+        let g0 = gem_sessions.first().unwrap();
+        assert_eq!(g0.conversation_id, "gem-uuid-7");
+        assert_eq!(g0.step_count, 2);
+        assert_eq!(g0.preview, "Add Gemini hooks");
+
+        _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

@@ -207,7 +207,7 @@ enforce_workspace_bounds = true
 ban_dangerous_files = true
 command = ["ls", "-la", "--group-directories-first", "--"]
 args = [
-    { name = "path", required = false, default = ".", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Directory path to list (defaults to project root '.')" }
+    { name = "path", required = false, default = ".", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Directory path to list (defaults to project root '.')" },
 ]
 output_capture = "stdout"
 truncate_lines = 150
@@ -222,7 +222,7 @@ ban_dangerous_files = true
 command = ["eza", "--tree", "--icons=never", "--ignore-glob", ".git|.jj|.tkg|target"]
 args = [
     { name = "level", required = false, default = "2", type = "integer", flag = "-L", regex = "^[1-5]$", description = "Max recursion tree depth (1 to 5, defaults to 2)" },
-    { name = "path", required = false, default = ".", flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Root path to display tree from (defaults to '.')" }
+    { name = "path", required = false, default = ".", flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Root path to display tree from (defaults to '.')" },
 ]
 output_capture = "stdout"
 truncate_lines = 150
@@ -234,11 +234,28 @@ action = "parameterized_command"
 category = "filesystem"
 enforce_workspace_bounds = true
 ban_dangerous_files = true
-command = ["fd", "--glob", "--hidden", "--exclude", ".git", "--exclude", ".jj", "--exclude", ".tkg", "--exclude", "target"]
+command = [
+    "fd",
+    "--glob",
+    "--hidden",
+    "--exclude",
+    ".git",
+    "--exclude",
+    ".jj",
+    "--exclude",
+    ".tkg",
+    "--exclude",
+    "target",
+]
 args = [
-    { name = "file_type", required = false, flag = "-t", enum = ["f", "d", "l", "x"], description = "Filter by file type: 'f' (file), 'd' (directory), 'l' (symlink), 'x' (executable)" },
+    { name = "file_type", required = false, flag = "-t", enum = [
+        "f",
+        "d",
+        "l",
+        "x",
+    ], description = "Filter by file type: 'f' (file), 'd' (directory), 'l' (symlink), 'x' (executable)" },
     { name = "pattern", required = true, flag = "--", regex = "^[^\\x00-\\x1f]+$", description = "File name pattern or extension (e.g. '*.toml', 'state', 'test_')" },
-    { name = "path", required = false, default = ".", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Root path to search from (defaults to '.')" }
+    { name = "path", required = false, default = ".", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Root path to search from (defaults to '.')" },
 ]
 empty_fallback = "No files found matching pattern."
 output_capture = "stdout"
@@ -253,7 +270,7 @@ enforce_workspace_bounds = true
 ban_dangerous_files = true
 command = ["stat", "--"]
 args = [
-    { name = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target file or directory path relative to workspace" }
+    { name = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target file or directory path relative to workspace" },
 ]
 output_capture = "stdout"
 truncate_lines = 50
@@ -267,7 +284,7 @@ enforce_workspace_bounds = true
 ban_dangerous_files = true
 command = ["file", "-b", "--"]
 args = [
-    { name = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target file path relative to workspace" }
+    { name = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target file path relative to workspace" },
 ]
 output_capture = "stdout"
 truncate_lines = 20
@@ -279,9 +296,14 @@ action = "parameterized_command"
 category = "filesystem"
 enforce_workspace_bounds = true
 ban_dangerous_files = true
-command = ["bash", "-c", "if [ -d \"$1\" ]; then find \"$1\" -type f -not -path '*/.*' -not -path '*/target/*' -exec wc -l {} +; else wc -l \"$1\"; fi", "--"]
+command = [
+    "bash",
+    "-c",
+    "if [ -d \"$1\" ]; then find \"$1\" -type f -not -path '*/.*' -not -path '*/target/*' -exec wc -l {} +; else wc -l \"$1\"; fi",
+    "--",
+]
 args = [
-    { name = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target file or directory path relative to workspace (e.g. 'src/lib.rs', 'src')" }
+    { name = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target file or directory path relative to workspace (e.g. 'src/lib.rs', 'src')" },
 ]
 output_capture = "stdout"
 truncate_lines = 50
@@ -299,7 +321,7 @@ args = [
     { name = "pattern", required = true, regex = "^[^\\x00-\\x1f]+$", description = "Text or regular expression to search across documentation" },
     { name = "path", required = false, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Specific documentation directory or file to search (defaults to all configured doc paths)" },
     { name = "is_regex", required = false, description = "Whether to evaluate pattern as a regular expression (defaults to true if pattern is valid regex)" },
-    { name = "case_sensitive", required = false, description = "Whether search is case-sensitive (defaults to false)" }
+    { name = "case_sensitive", required = false, description = "Whether search is case-sensitive (defaults to false)" },
 ]
 
 [tools.list_project_docs]
@@ -308,7 +330,7 @@ action = "parameterized_command"
 category = "documentation"
 command = ["fd", "--extension", "md", "--extension", "markdown", "--"]
 args = [
-    { name = "path", required = false, default = ".", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Directory to list docs from (defaults to project root '.')" }
+    { name = "path", required = false, default = ".", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Directory to list docs from (defaults to project root '.')" },
 ]
 empty_fallback = "No documentation files found."
 output_capture = "stdout"
@@ -325,7 +347,7 @@ command = ["rg", "--max-count", "30", "--max-columns", "200"]
 args = [
     { name = "fixed_strings", required = false, flag = "-F", switch = true, description = "Treat the query as a literal string rather than a regular expression" },
     { name = "query", required = true, flag = "-e", regex = "^[^\\x00-\\x1f]+$", description = "Text or regex search query to search across project files" },
-    { name = "path", required = false, default = ".", flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Directory or file to search (defaults to project root)" }
+    { name = "path", required = false, default = ".", flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Directory or file to search (defaults to project root)" },
 ]
 empty_fallback = "No occurrences found in codebase for the specified search query."
 success_exit_codes = [0, 1]
@@ -363,7 +385,16 @@ description = "Runs cargo +nightly fast check with zero token noise (exit code o
 action = "static_command"
 category = "compilation"
 tracks_circuit_breaker = false
-command = ["cargo", "+nightly", "--config", ".cargo/config.fast.toml", "check", "--profile", "fast", "--tests"]
+command = [
+    "cargo",
+    "+nightly",
+    "--config",
+    ".cargo/config.fast.toml",
+    "check",
+    "--profile",
+    "fast",
+    "--tests",
+]
 output_capture = "exit_code_only"
 timeout_seconds = 60
 success_exit_codes = [0]
@@ -373,10 +404,20 @@ description = "Runs cargo +nightly fast check and returns concise compiler diagn
 action = "parameterized_command"
 category = "compilation"
 tracks_circuit_breaker = true
-command = ["cargo", "+nightly", "--config", ".cargo/config.fast.toml", "check", "--profile", "fast", "--message-format=short", "--color=never"]
+command = [
+    "cargo",
+    "+nightly",
+    "--config",
+    ".cargo/config.fast.toml",
+    "check",
+    "--profile",
+    "fast",
+    "--message-format=short",
+    "--color=never",
+]
 args = [
     { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to check (defaults to workspace)" },
-    { name = "all_targets", required = false, flag = "--all-targets", switch = true, description = "Check all targets including tests, benches, and examples" }
+    { name = "all_targets", required = false, flag = "--all-targets", switch = true, description = "Check all targets including tests, benches, and examples" },
 ]
 output_capture = "both"
 empty_fallback = "Verification passed: 0 errors, 0 warnings."
@@ -388,9 +429,23 @@ description = "Runs cargo +nightly fast clippy across all targets with -D warnin
 action = "parameterized_command"
 category = "compilation"
 tracks_circuit_breaker = true
-command = ["cargo", "+nightly", "--config", ".cargo/config.fast.toml", "clippy", "--profile", "fast", "--all-targets", "--message-format=short", "--color=never", "--", "-D", "warnings"]
+command = [
+    "cargo",
+    "+nightly",
+    "--config",
+    ".cargo/config.fast.toml",
+    "clippy",
+    "--profile",
+    "fast",
+    "--all-targets",
+    "--message-format=short",
+    "--color=never",
+    "--",
+    "-D",
+    "warnings",
+]
 args = [
-    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to lint (defaults to workspace)" }
+    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to lint (defaults to workspace)" },
 ]
 output_capture = "both"
 empty_fallback = "Verification passed: 0 errors, 0 warnings."
@@ -402,7 +457,22 @@ description = "Runs cargo +nightly fast clippy --fix to automatically resolve co
 action = "static_command"
 category = "compilation"
 mutating = true
-command = ["cargo", "+nightly", "--config", ".cargo/config.fast.toml", "clippy", "--profile", "fast", "--fix", "--allow-dirty", "--allow-staged", "--all-targets", "--", "-D", "warnings"]
+command = [
+    "cargo",
+    "+nightly",
+    "--config",
+    ".cargo/config.fast.toml",
+    "clippy",
+    "--profile",
+    "fast",
+    "--fix",
+    "--allow-dirty",
+    "--allow-staged",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings",
+]
 output_capture = "stdout"
 truncate_lines = 100
 timeout_seconds = 180
@@ -416,9 +486,13 @@ tracks_circuit_breaker = true
 command = ["cargo", "+nightly", "--config", ".cargo/config.fast.toml", "build", "--profile", "fast"]
 args = [
     { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to build (defaults to workspace)" },
-    { name = "bin", required = false, flag = "--bin", conflicts_with = ["all_targets"], regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific binary to build" },
-    { name = "all_targets", required = false, flag = "--all-targets", switch = true, conflicts_with = ["bin"], description = "Build all binaries, tests, benches, and examples" },
-    { name = "release", required = false, flag = "--release", switch = true, description = "Build artifacts in release mode with optimizations" }
+    { name = "bin", required = false, flag = "--bin", conflicts_with = [
+        "all_targets",
+    ], regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific binary to build" },
+    { name = "all_targets", required = false, flag = "--all-targets", switch = true, conflicts_with = [
+        "bin",
+    ], description = "Build all binaries, tests, benches, and examples" },
+    { name = "release", required = false, flag = "--release", switch = true, description = "Build artifacts in release mode with optimizations" },
 ]
 output_capture = "both"
 truncate_lines = 100
@@ -431,7 +505,7 @@ category = "compilation"
 command = ["cargo", "+nightly", "--config", ".cargo/config.fast.toml", "run", "--profile", "fast"]
 args = [
     { name = "bin", required = false, flag = "--bin", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific binary name to execute" },
-    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package containing the binary" }
+    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package containing the binary" },
 ]
 output_capture = "both"
 truncate_lines = 100
@@ -443,13 +517,27 @@ timeout_seconds = 60
 description = "Visualizes crate module tree and visibility boundaries (pub/crate). Defaults to clean module tree; can focus on specific modules or packages."
 action = "parameterized_command"
 category = "diagnostics"
-command = ["env", "NO_COLOR=1", "RUST_BACKTRACE=0", "cargo", "modules", "structure", "--no-fns", "--no-traits", "--no-types"]
+command = [
+    "env",
+    "NO_COLOR=1",
+    "RUST_BACKTRACE=0",
+    "cargo",
+    "modules",
+    "structure",
+    "--no-fns",
+    "--no-traits",
+    "--no-types",
+]
 args = [
     { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific workspace package to inspect (e.g. tkg-mcp)" },
-    { name = "bin", required = false, flag = "--bin", conflicts_with = ["lib"], regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Disambiguate binary target for hybrid crates (e.g. 'pureV')" },
-    { name = "lib", required = false, flag = "--lib", switch = true, conflicts_with = ["bin"], description = "Disambiguate library target for hybrid crates" },
+    { name = "bin", required = false, flag = "--bin", conflicts_with = [
+        "lib",
+    ], regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Disambiguate binary target for hybrid crates (e.g. 'pureV')" },
+    { name = "lib", required = false, flag = "--lib", switch = true, conflicts_with = [
+        "bin",
+    ], description = "Disambiguate library target for hybrid crates" },
     { name = "focus_on", required = false, flag = "--focus-on", regex = "^[a-zA-Z0-9_:]+$", description = "Focus tree on a specific path, e.g. 'actions' or 'server'" },
-    { name = "max_depth", required = false, type = "integer", flag = "--max-depth", regex = "^[0-9]+$", description = "Maximum tree depth" }
+    { name = "max_depth", required = false, type = "integer", flag = "--max-depth", regex = "^[0-9]+$", description = "Maximum tree depth" },
 ]
 output_capture = "both"
 truncate_lines = 150
@@ -459,13 +547,27 @@ timeout_seconds = 30
 description = "Visualizes crate internal module dependency graph and coupling. Defaults to module-level dependency graph; can focus on specific modules or packages."
 action = "parameterized_command"
 category = "diagnostics"
-command = ["env", "NO_COLOR=1", "RUST_BACKTRACE=0", "cargo", "modules", "dependencies", "--no-fns", "--no-traits", "--no-types"]
+command = [
+    "env",
+    "NO_COLOR=1",
+    "RUST_BACKTRACE=0",
+    "cargo",
+    "modules",
+    "dependencies",
+    "--no-fns",
+    "--no-traits",
+    "--no-types",
+]
 args = [
     { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific workspace package to inspect (e.g. tkg-mcp)" },
-    { name = "bin", required = false, flag = "--bin", conflicts_with = ["lib"], regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Disambiguate binary target for hybrid crates (e.g. 'pureV')" },
-    { name = "lib", required = false, flag = "--lib", switch = true, conflicts_with = ["bin"], description = "Disambiguate library target for hybrid crates" },
+    { name = "bin", required = false, flag = "--bin", conflicts_with = [
+        "lib",
+    ], regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Disambiguate binary target for hybrid crates (e.g. 'pureV')" },
+    { name = "lib", required = false, flag = "--lib", switch = true, conflicts_with = [
+        "bin",
+    ], description = "Disambiguate library target for hybrid crates" },
     { name = "focus_on", required = false, flag = "--focus-on", regex = "^[a-zA-Z0-9_:]+$", description = "Focus dependency graph on a specific module path" },
-    { name = "max_depth", required = false, type = "integer", flag = "--max-depth", regex = "^[0-9]+$", description = "Maximum dependency graph depth" }
+    { name = "max_depth", required = false, type = "integer", flag = "--max-depth", regex = "^[0-9]+$", description = "Maximum dependency graph depth" },
 ]
 output_capture = "both"
 truncate_lines = 200
@@ -504,7 +606,7 @@ action = "parameterized_command"
 category = "diagnostics"
 command = ["cargo-public-api", "-s", "-s", "-v"]
 args = [
-    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Name of the package or dependency to inspect (e.g. 'ratatui', 'serde', 'tkg-common', defaults to current root crate)" }
+    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Name of the package or dependency to inspect (e.g. 'ratatui', 'serde', 'tkg-common', defaults to current root crate)" },
 ]
 output_capture = "both"
 truncate_lines = 150
@@ -516,7 +618,7 @@ action = "parameterized_command"
 category = "release"
 command = ["cargo", "semver-checks", "check-release"]
 args = [
-    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to check for SemVer violations (defaults to workspace)" }
+    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to check for SemVer violations (defaults to workspace)" },
 ]
 output_capture = "stdout"
 truncate_lines = 100
@@ -537,7 +639,7 @@ action = "parameterized_command"
 category = "diagnostics"
 command = ["cargo", "update", "--dry-run", "--verbose"]
 args = [
-    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to inspect for dependency updates (defaults to workspace)" }
+    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to inspect for dependency updates (defaults to workspace)" },
 ]
 empty_fallback = "All dependencies are up to date (no newer compatible or breaking releases detected)."
 output_capture = "both"
@@ -551,7 +653,7 @@ category = "diagnostics"
 command = ["cargo", "expand"]
 args = [
     { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific workspace package containing the item" },
-    { name = "item_path", required = true, regex = "^[a-zA-Z0-9_:]+$", description = "Target item or module path to expand (e.g. 'Processor' or 'types::state')" }
+    { name = "item_path", required = true, regex = "^[a-zA-Z0-9_:]+$", description = "Target item or module path to expand (e.g. 'Processor' or 'types::state')" },
 ]
 error_fallback = "token_smart_not_found"
 output_capture = "stdout"
@@ -565,8 +667,15 @@ category = "diagnostics"
 command = ["ast-grep", "run"]
 args = [
     { name = "pattern", required = true, flag = "--pattern=", regex = "^[^\\x00]+$", description = "Structural AST pattern to match (e.g. 'fn $NAME($$$ARGS) -> $RET')" },
-    { name = "lang", required = false, flag = "--lang", enum = ["rust", "c", "cpp", "python", "javascript", "typescript"], description = "Source language (defaults to rust)" },
-    { name = "path", required = false, flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "File or directory to search (defaults to project root)" }
+    { name = "lang", required = false, flag = "--lang", enum = [
+        "rust",
+        "c",
+        "cpp",
+        "python",
+        "javascript",
+        "typescript",
+    ], description = "Source language (defaults to rust)" },
+    { name = "path", required = false, flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "File or directory to search (defaults to project root)" },
 ]
 output_capture = "stdout"
 empty_fallback = "No AST pattern matches found in the specified path."
@@ -584,8 +693,15 @@ command = ["ast-grep", "run", "--update-all"]
 args = [
     { name = "pattern", required = true, flag = "--pattern=", regex = "^[^\\x00]+$", description = "AST pattern to match (e.g. '$A.unwrap()')" },
     { name = "rewrite", required = true, flag = "--rewrite=", regex = "^[^\\x00]+$", description = "Replacement AST template (e.g. '$A?')" },
-    { name = "lang", required = false, flag = "--lang", enum = ["rust", "c", "cpp", "python", "javascript", "typescript"], description = "Target language (defaults to rust)" },
-    { name = "path", required = false, flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target file or directory path (defaults to whole repository)" }
+    { name = "lang", required = false, flag = "--lang", enum = [
+        "rust",
+        "c",
+        "cpp",
+        "python",
+        "javascript",
+        "typescript",
+    ], description = "Target language (defaults to rust)" },
+    { name = "path", required = false, flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target file or directory path (defaults to whole repository)" },
 ]
 empty_fallback = "No matching AST patterns found to rewrite."
 success_exit_codes = [0, 1]
@@ -599,8 +715,15 @@ action = "parameterized_command"
 category = "diagnostics"
 command = ["graphtrail", "--db", ".tkg/cache/graphtrail.db"]
 args = [
-    { name = "action", required = true, enum = ["callers", "callees", "impact", "search", "context", "affected"], description = "Query action to execute (callers, callees, impact, search, context, affected)" },
-    { name = "target", required = true, flag = "--", regex = "^[^\\x00\\r\\n]+$", description = "Symbol name or relative file path to analyze" }
+    { name = "action", required = true, enum = [
+        "callers",
+        "callees",
+        "impact",
+        "search",
+        "context",
+        "affected",
+    ], description = "Query action to execute (callers, callees, impact, search, context, affected)" },
+    { name = "target", required = true, flag = "--", regex = "^[^\\x00\\r\\n]+$", description = "Symbol name or relative file path to analyze" },
 ]
 output_capture = "stdout"
 truncate_lines = 120
@@ -612,7 +735,7 @@ action = "parameterized_command"
 category = "diagnostics"
 command = ["graphtrail", "--db", ".tkg/cache/graphtrail.db", "dead-code"]
 args = [
-    { name = "limit", required = false, default = "50", type = "integer", flag = "--limit", regex = "^[0-9]+$", description = "Maximum number of candidate dead code callables to return (defaults to 50)" }
+    { name = "limit", required = false, default = "50", type = "integer", flag = "--limit", regex = "^[0-9]+$", description = "Maximum number of candidate dead code callables to return (defaults to 50)" },
 ]
 output_capture = "stdout"
 truncate_lines = 150
@@ -633,7 +756,7 @@ action = "parameterized_command"
 category = "diagnostics"
 command = ["rustc", "--explain"]
 args = [
-    { name = "error_code", required = true, regex = "^[A-Za-z0-9_-]+$", description = "Standard compiler error code (e.g. 'E0308', 'E0382')" }
+    { name = "error_code", required = true, regex = "^[A-Za-z0-9_-]+$", description = "Standard compiler error code (e.g. 'E0308', 'E0382')" },
 ]
 output_capture = "both"
 truncate_lines = 150
@@ -649,7 +772,7 @@ tracks_circuit_breaker = true
 command = ["cargo", "+nightly", "--config", ".cargo/config.fast.toml", "test", "--profile", "fast"]
 args = [
     { name = "test_target", required = false, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", flag = "--test", description = "Optional test binary name (e.g. 'concurrency_test', 'property_test')" },
-    { name = "filter", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Optional test name filter" }
+    { name = "filter", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Optional test name filter" },
 ]
 output_capture = "stdout"
 truncate_lines = 150
@@ -663,7 +786,7 @@ tracks_circuit_breaker = true
 command = ["cargo", "nextest", "run"]
 args = [
     { name = "test_target", required = false, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", flag = "--test", description = "Optional integration test target" },
-    { name = "filter", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Optional test name filter" }
+    { name = "filter", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Optional test name filter" },
 ]
 output_capture = "stdout"
 truncate_lines = 150
@@ -706,7 +829,7 @@ category = "testing"
 command = ["cargo", "fuzz", "run"]
 args = [
     { name = "target", required = true, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Fuzz target binary name to execute" },
-    { name = "max_time", required = false, default = "60", flag = "-max_total_time", regex = "^[0-9]+$", description = "Maximum fuzzing duration in seconds (defaults to 60)" }
+    { name = "max_time", required = false, default = "60", flag = "-max_total_time", regex = "^[0-9]+$", description = "Maximum fuzzing duration in seconds (defaults to 60)" },
 ]
 output_capture = "stderr"
 truncate_lines = 100
@@ -740,7 +863,7 @@ tracks_circuit_breaker = true
 command = ["cargo", "test"]
 args = [
     { name = "test_target", required = false, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", flag = "--test", description = "Target loom test harness binary (e.g. 'loom_ring_buffer')" },
-    { name = "filter", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Optional test filter" }
+    { name = "filter", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Optional test filter" },
 ]
 output_capture = "both"
 truncate_lines = 150
@@ -753,7 +876,7 @@ category = "testing"
 tracks_circuit_breaker = true
 command = ["cargo", "kani"]
 args = [
-    { name = "harness", required = false, flag = "--harness", regex = "^[a-zA-Z0-9_:]+$", description = "Specific proof harness to verify (e.g. 'verify_ring_buffer_invariants')" }
+    { name = "harness", required = false, flag = "--harness", regex = "^[a-zA-Z0-9_:]+$", description = "Specific proof harness to verify (e.g. 'verify_ring_buffer_invariants')" },
 ]
 output_capture = "both"
 truncate_lines = 150
@@ -768,7 +891,7 @@ category = "profiling"
 command = ["cargo", "asm"]
 args = [
     { name = "symbol", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Target function or method path to disassemble (e.g. 'crate::server::run'). If omitted, lists available symbols." },
-    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package in workspace" }
+    { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package in workspace" },
 ]
 output_capture = "stdout"
 truncate_lines = 250
@@ -782,7 +905,7 @@ require_gates = ["tests"]
 command = ["cargo", "bench"]
 args = [
     { name = "bench_target", required = false, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", flag = "--bench", description = "Specific benchmark target ('benchmark', 'criterion_bench', 'gungraun_bench')" },
-    { name = "filter", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Optional benchmark name filter" }
+    { name = "filter", required = false, regex = "^[a-zA-Z0-9_:]+$", description = "Optional benchmark name filter" },
 ]
 output_capture = "stdout"
 truncate_lines = 150
@@ -803,9 +926,18 @@ description = "Records a CPU sampling profile via samply without opening a brows
 action = "parameterized_command"
 category = "profiling"
 require_gates = ["tests"]
-command = ["samply", "record", "--save-only", "-o", ".tkg/cache/samply-profile.json", "--", "cargo", "bench"]
+command = [
+    "samply",
+    "record",
+    "--save-only",
+    "-o",
+    ".tkg/cache/samply-profile.json",
+    "--",
+    "cargo",
+    "bench",
+]
 args = [
-    { name = "bench_target", required = false, default = "core_benches", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", flag = "--bench", description = "Target benchmark binary to profile under samply (defaults to 'core_benches')" }
+    { name = "bench_target", required = false, default = "core_benches", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", flag = "--bench", description = "Target benchmark binary to profile under samply (defaults to 'core_benches')" },
 ]
 output_capture = "both"
 truncate_lines = 60
@@ -838,7 +970,7 @@ require_gates = ["tests"]
 command = ["hyperfine"]
 args = [
     { name = "warmup", required = false, default = "3", flag = "--warmup", type = "integer", regex = "^[0-9]+$", description = "Number of warmup runs before statistical timing (defaults to 3)" },
-    { name = "command", required = true, flag = "--", description = "Command line string or executable to benchmark via hyperfine" }
+    { name = "command", required = true, flag = "--", description = "Command line string or executable to benchmark via hyperfine" },
 ]
 output_capture = "stdout"
 truncate_lines = 40
@@ -852,7 +984,7 @@ enforce_workspace_bounds = true
 ban_dangerous_files = true
 command = ["llvm-mca", "-march=x86-64", "-mcpu=native", "--"]
 args = [
-    { name = "file", type = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Assembly file (.s or .asm) relative to workspace to analyze with llvm-mca" }
+    { name = "file", type = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Assembly file (.s or .asm) relative to workspace to analyze with llvm-mca" },
 ]
 output_capture = "stdout"
 truncate_lines = 150
@@ -866,8 +998,15 @@ enforce_workspace_bounds = true
 ban_dangerous_files = true
 command = ["llvm-objdump", "-d"]
 args = [
-    { name = "arch", required = false, flag = "--arch-name", enum = ["riscv64", "riscv32", "x86_64", "aarch64", "arm", "wasm32"], description = "Target architecture ('riscv64', 'riscv32', 'x86_64', 'aarch64', 'arm', 'wasm32')" },
-    { name = "file", type = "path", required = true, flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target binary, ELF, or object file relative to workspace to disassemble" }
+    { name = "arch", required = false, flag = "--arch-name", enum = [
+        "riscv64",
+        "riscv32",
+        "x86_64",
+        "aarch64",
+        "arm",
+        "wasm32",
+    ], description = "Target architecture ('riscv64', 'riscv32', 'x86_64', 'aarch64', 'arm', 'wasm32')" },
+    { name = "file", type = "path", required = true, flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Target binary, ELF, or object file relative to workspace to disassemble" },
 ]
 output_capture = "stdout"
 truncate_lines = 200
@@ -879,7 +1018,7 @@ action = "parameterized_command"
 category = "diagnostics"
 command = ["cargo", "size"]
 args = [
-    { name = "bin", required = false, flag = "--bin", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Target binary name" }
+    { name = "bin", required = false, flag = "--bin", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Target binary name" },
 ]
 output_capture = "stdout"
 truncate_lines = 60
@@ -891,7 +1030,7 @@ action = "parameterized_command"
 category = "diagnostics"
 command = ["cargo", "nm"]
 args = [
-    { name = "bin", required = false, flag = "--bin", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Target binary name" }
+    { name = "bin", required = false, flag = "--bin", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Target binary name" },
 ]
 output_capture = "stdout"
 truncate_lines = 100
@@ -914,8 +1053,12 @@ enforce_workspace_bounds = true
 ban_dangerous_files = true
 command = ["nasm", "-o", "/dev/null"]
 args = [
-    { name = "format", required = false, default = "elf64", flag = "-f", enum = ["elf64", "elf32", "bin"], description = "Target output format ('elf64', 'elf32', or raw 'bin', defaults to 'elf64')" },
-    { name = "file", type = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Assembly source file (.asm or .s) relative to workspace to assemble and verify" }
+    { name = "format", required = false, default = "elf64", flag = "-f", enum = [
+        "elf64",
+        "elf32",
+        "bin",
+    ], description = "Target output format ('elf64', 'elf32', or raw 'bin', defaults to 'elf64')" },
+    { name = "file", type = "path", required = true, regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Assembly source file (.asm or .s) relative to workspace to assemble and verify" },
 ]
 empty_fallback = "Assembly check passed (valid syntax and instruction encoding)"
 output_capture = "both"
@@ -950,7 +1093,7 @@ category = "diagnostics"
 enforce_sandbox = true
 command = ["python3", "-c"]
 args = [
-    { name = "code", required = true, regex = "^[^\\x00]+$", description = "Python expression or multi-line snippet importing sympy to evaluate" }
+    { name = "code", required = true, regex = "^[^\\x00]+$", description = "Python expression or multi-line snippet importing sympy to evaluate" },
 ]
 output_capture = "stdout"
 truncate_lines = 50
@@ -997,7 +1140,7 @@ command = ["jj", "diff", "--color=never"]
 args = [
     { name = "path", required = false, flag = "--", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Specific file or directory path to focus the diff on (defaults to whole working tree)" },
     { name = "summary", required = false, flag = "-s", switch = true, description = "Show concise summary of modified, added, and deleted files without line diffs" },
-    { name = "revision", required = false, flag = "-r", regex = "^[a-zA-Z0-9_@~^.:][a-zA-Z0-9_@~^.:-]*$", description = "Target revision or revset (defaults to '@')" }
+    { name = "revision", required = false, flag = "-r", regex = "^[a-zA-Z0-9_@~^.:][a-zA-Z0-9_@~^.:-]*$", description = "Target revision or revset (defaults to '@')" },
 ]
 empty_fallback = "Clean (no working copy changes detected)"
 output_capture = "stdout"
@@ -1059,7 +1202,7 @@ mutating = true
 command = ["jj", "describe", "--color=never"]
 args = [
     { name = "message", required = true, flag = "-m", regex = "^[^\\x00]+$", description = "Commit description message (e.g. 'feat(mcp): add module dependency inspection')" },
-    { name = "revision", required = false, flag = "-r", regex = "^[a-zA-Z0-9_@~^.:][a-zA-Z0-9_@~^.:-]*$", description = "Target revision to describe (defaults to '@')" }
+    { name = "revision", required = false, flag = "-r", regex = "^[a-zA-Z0-9_@~^.:][a-zA-Z0-9_@~^.:-]*$", description = "Target revision to describe (defaults to '@')" },
 ]
 output_capture = "stdout"
 truncate_lines = 50
@@ -1070,7 +1213,7 @@ description = "Ensures an isolated Jujutsu workspace exists for a subagent (.tkg
 action = "workspace_ensure"
 category = "workspace"
 args = [
-    { name = "agent", required = true, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Subagent name (e.g. 'coder', 'test-author', 'mini', 'perf-analyst')" }
+    { name = "agent", required = true, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Subagent name (e.g. 'coder', 'test-author', 'mini', 'perf-analyst')" },
 ]
 truncate_lines = 50
 timeout_seconds = 15
@@ -1080,7 +1223,7 @@ description = "Inspects revisions and working-copy diffs within a subagent's iso
 action = "workspace_inspect"
 category = "workspace"
 args = [
-    { name = "agent", required = true, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Subagent name whose isolated workspace should be inspected" }
+    { name = "agent", required = true, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Subagent name whose isolated workspace should be inspected" },
 ]
 truncate_lines = 250
 timeout_seconds = 15
@@ -1093,7 +1236,10 @@ skip_gates = ["workspace_clean", "linter", "tests"]
 mutating = true
 args = [
     { name = "agent", required = true, regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Subagent name whose isolated workspace should be merged" },
-    { name = "strategy", required = false, default = "rebase", enum = ["rebase", "squash"], description = "Merge strategy: 'rebase' (default) or 'squash'" }
+    { name = "strategy", required = false, default = "rebase", enum = [
+        "rebase",
+        "squash",
+    ], description = "Merge strategy: 'rebase' (default) or 'squash'" },
 ]
 truncate_lines = 100
 timeout_seconds = 120
@@ -1105,7 +1251,7 @@ category = "vcs"
 enforce_workspace_bounds = true
 command = ["jj", "diff", "--summary", "--color=never"]
 args = [
-    { name = "workspace_path", required = false, flag = "-R", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Optional workspace path to inspect (defaults to current workspace)" }
+    { name = "workspace_path", required = false, flag = "-R", regex = "^(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*)(/(\\.|\\.[^\\x00-\\x1f/.][^\\x00-\\x1f/]*|[^\\x00-\\x1f/.-][^\\x00-\\x1f/]*))*/?$", description = "Optional workspace path to inspect (defaults to current workspace)" },
 ]
 empty_fallback = "Clean (0 uncommitted changes)"
 output_capture = "stdout"
@@ -1130,7 +1276,7 @@ skip_gates = ["workspace_clean"]
 command = ["cargo", "doc", "--no-deps"]
 args = [
     { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", description = "Specific package to document (defaults to workspace)" },
-    { name = "private_items", required = false, flag = "--document-private-items", switch = true, description = "Document all private items in addition to public API" }
+    { name = "private_items", required = false, flag = "--document-private-items", switch = true, description = "Document all private items in addition to public API" },
 ]
 output_capture = "both"
 truncate_lines = 100
@@ -1141,7 +1287,17 @@ description = "Verifies compilation health of benches and examples (cargo +night
 action = "static_command"
 category = "compilation"
 tracks_circuit_breaker = true
-command = ["cargo", "+nightly", "--config", ".cargo/config.fast.toml", "check", "--profile", "fast", "--benches", "--examples"]
+command = [
+    "cargo",
+    "+nightly",
+    "--config",
+    ".cargo/config.fast.toml",
+    "check",
+    "--profile",
+    "fast",
+    "--benches",
+    "--examples",
+]
 output_capture = "both"
 truncate_lines = 100
 timeout_seconds = 60
@@ -1154,7 +1310,7 @@ tracks_circuit_breaker = true
 command = [
     "bash",
     "-c",
-    "echo '=== 1. VCS Conflict Check ===' && (git diff --check || (echo 'FAILED: Unresolved VCS conflict markers detected' && exit 1)) && echo 'PASSED: No conflict markers' && echo '=== 2. Codebase Auto-Format ===' && cargo fmt && echo 'PASSED: Formatter executed' && echo '=== 3. Unused Dependency Audit ===' && (! command -v cargo-machete &>/dev/null || cargo machete) && echo 'PASSED: No unused dependencies' && echo '=== 4. Deterministic Nextest ===' && (cargo +nightly --config .cargo/config.fast.toml test --profile fast || cargo test) && echo 'PASSED: All tests green' && echo '=== 5. Pedantic Clippy (-D warnings) ===' && (cargo +nightly --config .cargo/config.fast.toml clippy --profile fast --all-targets -- -D warnings || cargo clippy --all-targets -- -D warnings) && echo 'PASSED: Clippy 0 warnings' && echo '=== 6. Ancillary Targets Check ===' && (cargo +nightly --config .cargo/config.fast.toml check --profile fast --benches --examples || cargo check --benches --examples) && echo 'PASSED: Benches and examples compile' && echo '=== 7. Offline Docs Check ===' && cargo doc --no-deps && echo 'PASSED: Documentation builds without broken links' && echo '=== ALL PRE-RELEASE GAUNTLET CHECKS PASSED ==='"
+    "echo '=== 1. VCS Conflict Check ===' && (git diff --check || (echo 'FAILED: Unresolved VCS conflict markers detected' && exit 1)) && echo 'PASSED: No conflict markers' && echo '=== 2. Codebase Auto-Format ===' && cargo fmt && echo 'PASSED: Formatter executed' && echo '=== 3. Unused Dependency Audit ===' && (! command -v cargo-machete &>/dev/null || cargo machete) && echo 'PASSED: No unused dependencies' && echo '=== 4. Deterministic Nextest ===' && (cargo +nightly --config .cargo/config.fast.toml test --profile fast || cargo test) && echo 'PASSED: All tests green' && echo '=== 5. Pedantic Clippy (-D warnings) ===' && (cargo +nightly --config .cargo/config.fast.toml clippy --profile fast --all-targets -- -D warnings || cargo clippy --all-targets -- -D warnings) && echo 'PASSED: Clippy 0 warnings' && echo '=== 6. Ancillary Targets Check ===' && (cargo +nightly --config .cargo/config.fast.toml check --profile fast --benches --examples || cargo check --benches --examples) && echo 'PASSED: Benches and examples compile' && echo '=== 7. Offline Docs Check ===' && cargo doc --no-deps && echo 'PASSED: Documentation builds without broken links' && echo '=== ALL PRE-RELEASE GAUNTLET CHECKS PASSED ==='",
 ]
 output_capture = "both"
 truncate_lines = 150
@@ -1165,7 +1321,7 @@ description = "Dynamically switches the active agent persona in .tkg/state/activ
 action = "set_active_agent"
 category = "workflow"
 args = [
-    { name = "agent", required = true, regex = "^[a-zA-Z0-9_-]+$", description = "Name of the agent persona to switch into" }
+    { name = "agent", required = true, regex = "^[a-zA-Z0-9_-]+$", description = "Name of the agent persona to switch into" },
 ]
 truncate_lines = 10
 timeout_seconds = 5
@@ -1185,7 +1341,7 @@ args = [
     { name = "summary", required = true, description = "Executive summary of completed tasks, architecture decisions, and remaining work" },
     { name = "status", required = false, default = "Completed", description = "Milestone status, e.g. 'Completed', 'ReadyForReview', 'Blocked'" },
     { name = "deliverables", required = false, description = "Comma-separated list of deliverables, specs, or modules produced" },
-    { name = "target_agent", required = false, regex = "^[a-zA-Z0-9_-]+$", description = "Recommended next agent persona to take over" }
+    { name = "target_agent", required = false, regex = "^[a-zA-Z0-9_-]+$", description = "Recommended next agent persona to take over" },
 ]
 truncate_lines = 20
 timeout_seconds = 10
@@ -1196,7 +1352,7 @@ action = "detect_wip"
 category = "workflow"
 args = [
     { name = "conversation_id", required = false, regex = "^[a-zA-Z0-9_-]+$", description = "Optional conversation or session ID for cache isolation" },
-    { name = "max_preview", required = false, description = "Maximum number of modified files to display in preview (default: 10)" }
+    { name = "max_preview", required = false, description = "Maximum number of modified files to display in preview (default: 10)" },
 ]
 truncate_lines = 30
 timeout_seconds = 5

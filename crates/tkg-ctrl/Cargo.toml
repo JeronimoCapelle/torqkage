@@ -9,25 +9,36 @@ documentation.workspace = true
 description = "TorqKage (tkg): Interactive Ratatui TUI control deck & launcher for managing AI coding agents, MCP tool permissions, Jujutsu workspaces, and sandboxes"
 readme.workspace = true
 keywords = ["mcp", "tui", "ratatui", "agents", "torqkage"]
-categories = [
-    "command-line-utilities",
-    "development-tools",
-    "command-line-interface",
-    "config",
-]
+categories = ["command-line-utilities", "development-tools", "command-line-interface", "config"]
 
 [[bin]]
 name = "tkg"
 path = "src/main.rs"
 
+[features]
+default = []
+tui = ["dep:ratatui", "dep:crossterm"]
+
 [dependencies]
 tkg-common = { workspace = true, features = ["sqlite", "diagnostics"] }
+thiserror = { workspace = true }
 tracing = { workspace = true }
-ratatui = { workspace = true }
-crossterm = { workspace = true }
+ratatui = { workspace = true, optional = true }
+crossterm = { workspace = true, optional = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
 which = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/torqkage-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"

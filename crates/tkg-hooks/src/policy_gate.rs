@@ -145,6 +145,18 @@ impl ParsedToolsConfig {
             .is_some_and(ToolDefinition::mutating)
     }
 
+    /// Checks whether a tool is mutating according to `tools.toml`, falling
+    /// back to default mutation-tool name heuristics when `tool_name` is not
+    /// declared (so zero-config workspaces still enforce the circuit breaker on
+    /// native host tools such as `Write`, `Edit`, or `edit_file`).
+    #[must_use]
+    pub(crate) fn is_mutating_with_fallback(&self, tool_name: &str) -> bool {
+        self.tools.get(tool_name).map_or_else(
+            || tkg_common::is_default_fallback_mutation_tool(tool_name),
+            ToolDefinition::mutating,
+        )
+    }
+
     /// Checks whether a tool requires interactive permission confirmation.
     #[must_use]
     pub(crate) fn requires_permission_gate(&self, tool_name: &str) -> bool {

@@ -553,3 +553,149 @@ fn test_claude_session_start_pre_invocation_and_custom_subagent_tools_e2e() {
 
     std::fs::remove_dir_all(&ws).expect("cleanup");
 }
+
+#[test]
+fn test_gemini_cursor_copilot_wire_dialects_e2e() {
+    let ws = std::env::temp_dir().join(format!("tkg_multi_dialect_e2e_{}", std::process::id()));
+    _ = std::fs::remove_dir_all(&ws);
+    std::fs::create_dir_all(&ws).expect("create temp workspace");
+    std::fs::write(
+        ws.join("tools.toml"),
+        "[tools.custom_mutator]\nmutating = true\naction = \"static_command\"\n",
+    )
+    .expect("write tools.toml");
+
+    // 1. Gemini CLI BeforeTool emits top-level decision = "ask" with exit 0
+    let gem_payload = serde_json::json!({
+        "session_id": "gem-e2e-1",
+        "cwd": ws,
+        "hook_event_name": "BeforeTool",
+        "tool_name": "custom_mutator",
+        "tool_input": {}
+    })
+    .to_string();
+    let (gem_code, gem_out, gem_err) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&gem_payload), &[]);
+    assert_eq!(gem_code, Some(0), "stderr: {gem_err}");
+    let gem_v: serde_json::Value = serde_json::from_str(&gem_out).expect("valid Gemini JSON");
+    assert_eq!(
+        gem_v.get("decision").and_then(serde_json::Value::as_str),
+        Some("ask")
+    );
+
+    // 2. Cursor preToolUse emits Cursor's { "permission": "ask" }
+    let cur_payload = serde_json::json!({
+        "conversation_id": "cur-e2e-1",
+        "cwd": ws,
+        "hook_event_name": "preToolUse",
+        "tool_name": "custom_mutator",
+        "tool_input": {}
+    })
+    .to_string();
+    let (cur_code, cur_out, cur_err) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&cur_payload), &[]);
+    assert_eq!(cur_code, Some(0), "stderr: {cur_err}");
+    let cur_v: serde_json::Value = serde_json::from_str(&cur_out).expect("valid Cursor JSON");
+    assert_eq!(
+        cur_v.get("permission").and_then(serde_json::Value::as_str),
+        Some("ask")
+    );
+
+    // 3. GitHub Copilot camelCase toolName/toolArgs emits hookSpecificOutput.permissionDecision
+    let gh_payload = serde_json::json!({
+        "cwd": ws,
+        "hook_event_name": "preToolUse",
+        "toolName": "custom_mutator",
+        "toolArgs": "{}"
+    })
+    .to_string();
+    let (gh_code, gh_out, gh_err) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&gh_payload), &[]);
+    assert_eq!(gh_code, Some(0), "stderr: {gh_err}");
+    let gh_v: serde_json::Value = serde_json::from_str(&gh_out).expect("valid Copilot JSON");
+    assert_eq!(
+        gh_v.pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("ask")
+    );
+
+    _ = std::fs::remove_dir_all(&ws);
+}
+
+#[test]
+fn test_zero_toml_workspace_enforces_manifest_guard_and_circuit_breaker() {
+    let ws = std::env::temp_dir().join(format!("tkg_zero_toml_e2e_{}", std::process::id()));
+    _ = std::fs::remove_dir_all(&ws);
+    std::fs::create_dir_all(&ws).expect("create empty ws");
+
+    // 1. No .tkg/tools.toml and no .tkg/hooks.toml: native `Edit` on Cargo.toml is still blocked.
+    let manifest_payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": ws,
+        "tool_name": "Edit",
+        "tool_input": { "file_path": "Cargo.toml" }
+    })
+    .to_string();
+    let (code, out, err) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&manifest_payload), &[]);
+    assert_eq!(code, Some(0), "stderr: {err}");
+    assert!(
+        out.contains("MANIFEST MUTATION GUARD"),
+        "expected manifest guard even with zero TOMLs, got: {out}"
+    );
+
+    // 2. Trip the 2-strike breaker in this zero-TOML workspace.
+    let mut ledger = tkg_common::CircuitBreakerLedger::new("default");
+    ledger
+        .record_failure(
+            &ws,
+            Some("default"),
+            Some("cargo_test"),
+            Some("E0308"),
+            None,
+        )
+        .expect("strike 1");
+    ledger
+        .record_failure(
+            &ws,
+            Some("default"),
+            Some("cargo_test"),
+            Some("E0308"),
+            None,
+        )
+        .expect("strike 2");
+
+    // Mutating native host `Write` on a normal source file must now be halted.
+    let write_src_payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": ws,
+        "tool_name": "Write",
+        "tool_input": { "file_path": "src/main.rs" }
+    })
+    .to_string();
+    let (w_code, w_out, w_err) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&write_src_payload), &[]);
+    assert_eq!(w_code, Some(0), "stderr: {w_err}");
+    assert!(
+        w_out.contains("CIRCUIT BREAKER TRIPPED"),
+        "expected tripped breaker on native Write without tools.toml, got: {w_out}"
+    );
+
+    // Read-only `Read` must still be allowed so the agent can inspect errors.
+    let read_payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": ws,
+        "tool_name": "Read",
+        "tool_input": { "file_path": "src/main.rs" }
+    })
+    .to_string();
+    let (r_code, r_out, r_err) =
+        run_hook_subcommand_with_env("pre-tool-use", Some(&read_payload), &[]);
+    assert_eq!(r_code, Some(0), "stderr: {r_err}");
+    assert!(
+        !r_out.contains("CIRCUIT BREAKER TRIPPED"),
+        "read-only tool should stay allowed when breaker is tripped, got: {r_out}"
+    );
+
+    _ = std::fs::remove_dir_all(&ws);
+}

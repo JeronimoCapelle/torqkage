@@ -112,17 +112,10 @@ impl Default for CircuitBreakerConfig {
 }
 
 fn default_protected_patterns() -> Vec<String> {
-    vec![
-        "Cargo.toml".into(),
-        "Cargo.lock".into(),
-        "build.rs".into(),
-        "CMakeLists.txt".into(),
-        "meson.build".into(),
-        "package.json".into(),
-        "build.zig".into(),
-        "go.mod".into(),
-        "Makefile".into(),
-    ]
+    tkg_common::DEFAULT_PROTECTED_MANIFESTS
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
 }
 
 /// Manifest mutation guard configuration protecting build files against host

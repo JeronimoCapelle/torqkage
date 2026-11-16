@@ -17,7 +17,7 @@ pub(crate) fn execute() -> std::process::ExitCode {
 
     let response =
         detect_conflicts(&root).map_or_else(PreToolResponse::allow, PreToolResponse::deny);
-    crate::stdin::finalize_pre_tool_use(&response, &root, false, false)
+    crate::stdin::finalize_pre_tool_use(&response, &root, None, false)
 }
 
 /// Checks whether any conflicts exist in the repository.

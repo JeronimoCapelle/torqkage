@@ -69,7 +69,7 @@ fn evaluate_pre_tool_use_checked(
                         ledger.max_strikes = config.circuit_breaker.max_strikes;
                     }
                     if (ledger.tripped || ledger.consecutive_failures >= ledger.max_strikes)
-                        && tools_cfg.is_mutating(tool_name)
+                        && tools_cfg.is_mutating_with_fallback(tool_name)
                     {
                         return Ok(PreToolResponse::ask(format!(
                             "🛑 CIRCUIT BREAKER TRIPPED ({} consecutive gate/verification failures):\n\

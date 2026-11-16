@@ -3,17 +3,20 @@
 //! Interactive process launcher and pre-flight validation pipeline for
 //! dispatching agent sessions from `tkg`.
 
+#[cfg(feature = "tui")]
+use std::io::{self, stdout};
 use std::{
     fmt::Write,
-    io::{self, stdout},
     path::Path,
     process::{Command, ExitStatus, Stdio},
 };
 
+#[cfg(feature = "tui")]
 use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+#[cfg(feature = "tui")]
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::model::AgentManifest;
@@ -184,6 +187,7 @@ fn resolve_launch_workspace(
 /// # Errors
 /// Returns an error string if pre-launch checks fail or if the harness cannot
 /// be executed.
+#[cfg(feature = "tui")]
 pub(crate) fn launch_agent_interactive(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     workspace_root: &Path,

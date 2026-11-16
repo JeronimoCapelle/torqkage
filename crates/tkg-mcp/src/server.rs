@@ -904,7 +904,7 @@ mod tests {
             id: Some(json!(30)),
             method: "initialize".to_owned(),
             params: Some(json!({
-                "clientInfo": { "name": "Cursor", "version": "0.48.0" }
+                "clientInfo": { "name": "Windsurf Cascade", "version": "1.0.0" }
             })),
         };
         let init_resp = server.handle_request(init_req).expect("init response");
@@ -922,8 +922,33 @@ mod tests {
             .unwrap()
             .to_owned();
         let status_json: serde_json::Value = serde_json::from_str(&status_text).unwrap();
-        assert_eq!(status_json["detected_harness"], "cursor");
+        assert_eq!(status_json["detected_harness"], "windsurf");
         assert_eq!(status_json["in_band_seatbelt"], true);
+
+        let cur_init = JsonRpcRequest {
+            jsonrpc: "2.0".to_owned(),
+            id: Some(json!(32)),
+            method: "initialize".to_owned(),
+            params: Some(json!({
+                "clientInfo": { "name": "Cursor", "version": "0.50.0" }
+            })),
+        };
+        assert!(server.handle_request(cur_init).unwrap().error.is_none());
+        let cur_status = server
+            .handle_request(JsonRpcRequest {
+                jsonrpc: "2.0".to_owned(),
+                id: Some(json!(33)),
+                method: "resources/read".to_owned(),
+                params: Some(json!({ "uri": "tkg://status" })),
+            })
+            .unwrap();
+        let cur_text = cur_status.result.unwrap()["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let cur_json: serde_json::Value = serde_json::from_str(&cur_text).unwrap();
+        assert_eq!(cur_json["detected_harness"], "cursor");
+        assert_eq!(cur_json["in_band_seatbelt"], false);
     }
 
     #[test]
@@ -967,7 +992,7 @@ mod tests {
                 jsonrpc: "2.0".to_owned(),
                 id: Some(json!(1)),
                 method: "initialize".to_owned(),
-                params: Some(json!({ "clientInfo": { "name": "cursor" } })),
+                params: Some(json!({ "clientInfo": { "name": "windsurf" } })),
             })
             .expect("init response");
         assert!(init_resp.error.is_none());

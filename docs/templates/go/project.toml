@@ -9,16 +9,10 @@ version = "0.1.0"
 
 [workspace]
 containers = ["cmd", "internal", "pkg"]
-ignored_paths = [
-    ".cache/go-build",
-    ".tkg/state",
-    ".tkg/workspaces",
-]
+ignored_paths = [".cache/go-build", ".tkg/state", ".tkg/workspaces"]
 
 [sandbox]
-bind_mounts = [
-    ".cache/go-build",
-]
+bind_mounts = [".cache/go-build"]
 
 [gates.compilation]
 command = ["go", "build", "./..."]

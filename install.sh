@@ -53,7 +53,8 @@ Options:
   --version <tag>                Specific release tag to download (default: latest)
   --local-only                   Only stage into ./plugins/torqkage/bin/ without global install
   --no-bundle                    Install tkg, tkg-mcp, tkg-hooks into ~/.local/bin/ only
-  --harness <name>               Target harness: agy (default), claude, opencode, cursor, custom
+  --harness <name>               Target harness: agy (default), claude, codex, gemini, cursor,
+                                 opencode, github-copilot, vscode, windsurf, roo, cline, custom
                                  (also settable via TKG_HARNESS)
   --plugin-dir <path>            Override the global plugin bundle install directory
   --init-config, -y, --yes       Scaffold ${GLOBAL_CONFIG_PATH} without prompting
@@ -145,7 +146,14 @@ resolve_target_plugin_dir() {
         agy|antigravity)    TARGET_PLUGIN_DIR="${HOME}/.gemini/config/plugins/torqkage" ;;
         opencode)           TARGET_PLUGIN_DIR="${HOME}/.local/share/opencode/plugins/torqkage" ;;
         claude|claude-code) TARGET_PLUGIN_DIR="${HOME}/.claude/plugins/torqkage" ;;
-        cursor)             TARGET_PLUGIN_DIR="${HOME}/.cursor/plugins/torqkage" ;;
+        cursor|cursor-agent) TARGET_PLUGIN_DIR="${HOME}/.cursor/plugins/torqkage" ;;
+        codex|openai-codex|codex-cli) TARGET_PLUGIN_DIR="${HOME}/.codex/plugins/torqkage" ;;
+        gemini|gemini-cli)  TARGET_PLUGIN_DIR="${HOME}/.gemini/extensions/torqkage" ;;
+        github-copilot|copilot-cli|gh-copilot|copilot|vscode|vs-code|vscode-copilot)
+                            TARGET_PLUGIN_DIR="${HOME}/.copilot/plugins/torqkage" ;;
+        windsurf|codeium)   TARGET_PLUGIN_DIR="${HOME}/.codeium/windsurf/plugins/torqkage" ;;
+        roo|roo-code|roocode) TARGET_PLUGIN_DIR="${HOME}/.roo/plugins/torqkage" ;;
+        cline|claude-dev)   TARGET_PLUGIN_DIR="${HOME}/.cline/plugins/torqkage" ;;
         ""|custom)          TARGET_PLUGIN_DIR="${HOME}/.config/tkg/plugins/torqkage" ;;
         *)                  TARGET_PLUGIN_DIR="${HOME}/.${slug}/plugins/torqkage" ;;
     esac

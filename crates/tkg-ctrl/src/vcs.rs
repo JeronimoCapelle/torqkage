@@ -3,12 +3,16 @@
 
 use std::{fmt::Write, path::Path, process::Command};
 
-use tkg_common::{DEFAULT_TOOL_TIMEOUT_SECS, DEFAULT_VCS_QUERY_TIMEOUT_SECS, SubprocessSupervisor};
+#[cfg(feature = "tui")]
+use tkg_common::DEFAULT_VCS_QUERY_TIMEOUT_SECS;
+use tkg_common::{DEFAULT_TOOL_TIMEOUT_SECS, SubprocessSupervisor};
 
+#[cfg(feature = "tui")]
 use crate::model::AgentManifest;
 
 /// Writes an agent manifest back to disk using the frontmatter format of the
 /// configured harness.
+#[cfg(feature = "tui")]
 pub(crate) fn save_agent_to_disk(
     agent: &AgentManifest,
     harness: &dyn tkg_common::Harness,
@@ -20,6 +24,7 @@ pub(crate) fn save_agent_to_disk(
 
 /// Takes a quick VCS snapshot before applying edits to ensure atomic recovery
 /// without clobbering user descriptions.
+#[cfg(feature = "tui")]
 pub(crate) fn take_vcs_snapshot(workspace_root: &Path, message: &str) -> String {
     if workspace_root.join(".jj").is_dir() {
         // Query current description to avoid clobbering user's commit message
@@ -173,6 +178,7 @@ pub(crate) fn run_plugin_validation(workspace_root: &Path) -> Result<String, Str
 }
 
 /// Reinstalls or registers the configuration for the active execution harness.
+#[cfg(feature = "tui")]
 pub(crate) fn run_plugin_install(workspace_root: &Path) -> Result<String, String> {
     let project_cfg = tkg_common::ProjectConfig::detect_or_load(workspace_root);
     let runner = project_cfg.resolved_runner();
@@ -180,6 +186,7 @@ pub(crate) fn run_plugin_install(workspace_root: &Path) -> Result<String, String
 }
 
 /// Reverts changes to an agent file using VCS or reloading original disk state.
+#[cfg(feature = "tui")]
 pub(crate) fn rollback_agent_file(
     workspace_root: &Path,
     file_path: &Path,

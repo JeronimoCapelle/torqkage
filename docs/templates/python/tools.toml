@@ -10,8 +10,12 @@ enforce_sandbox = true
 command = ["uv", "run", "pytest", "-q"]
 args = [
     { name = "filter", required = false, flag = "-k", regex = "^[a-zA-Z0-9_]+$", description = "Test name keyword filter" },
-    { name = "scope", required = false, default = "tests", enum = ["tests", "tests/unit", "tests/integration"], description = "Directory scope to execute" },
-    { name = "fail_fast", required = false, default = "false", flag = "-x", type = "boolean", description = "Exit instantly on first failure" }
+    { name = "scope", required = false, default = "tests", enum = [
+        "tests",
+        "tests/unit",
+        "tests/integration",
+    ], description = "Directory scope to execute" },
+    { name = "fail_fast", required = false, default = "false", flag = "-x", type = "boolean", description = "Exit instantly on first failure" },
 ]
 output_capture = "stdout"
 truncate_lines = 100
@@ -36,3 +40,32 @@ command = ["uv", "run", "ruff", "check", "--fix", "."]
 output_capture = "stdout"
 truncate_lines = 40
 timeout_seconds = 20
+
+[tools.pytest_local]
+description = "Executes pytest directly from active environment or .venv"
+action = "static_command"
+category = "testing"
+enforce_sandbox = true
+tracks_circuit_breaker = true
+command = ["pytest", "-q"]
+output_capture = "stdout"
+truncate_lines = 100
+timeout_seconds = 60
+
+[tools.ruff_check]
+description = "Runs read-only Ruff lint diagnostics across Python sources"
+action = "static_command"
+category = "linter"
+command = ["ruff", "check", "."]
+output_capture = "stdout"
+truncate_lines = 50
+timeout_seconds = 20
+
+[tools.pyright_check]
+description = "Runs Pyright static type checking across Python sources"
+action = "static_command"
+category = "types"
+command = ["pyright"]
+output_capture = "stdout"
+truncate_lines = 60
+timeout_seconds = 30

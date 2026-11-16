@@ -13,82 +13,82 @@
 # ==============================================================================
 # 1. CORE WORKFLOW & RUNNERS
 # ==============================================================================
-b            = "build"
-r            = "run"
-c            = "check"
-t            = "nextest run"
+b = "build"
+r = "run"
+c = "check"
+t = "nextest run"
 
 # Rapid iteration profile aliases (fully stable, declared in Cargo.toml)
-fast-check   = "check --profile fast"
-fast-build   = "build --profile fast"
-fast-test    = "test --profile fast"
-fast-clippy  = "clippy --profile fast"
-fc           = "check --profile fast"
-fb           = "build --profile fast"
-ft           = "test --profile fast"
+fast-check = "check --profile fast"
+fast-build = "build --profile fast"
+fast-test = "test --profile fast"
+fast-clippy = "clippy --profile fast"
+fc = "check --profile fast"
+fb = "build --profile fast"
+ft = "test --profile fast"
 
 # Cranelift + Mold rapid iteration (requires Nightly + Cranelift + Mold)
 # Invoke with `+nightly` (e.g. `cargo +nightly cranelift-build`) or `./plugins/torqkage/bin/cargo-fast build`
-cranelift-check  = "check --config .cargo/config.fast.toml --profile fast"
-cranelift-build  = "build --config .cargo/config.fast.toml --profile fast"
-cranelift-test   = "test --config .cargo/config.fast.toml --profile fast"
+cranelift-check = "check --config .cargo/config.fast.toml --profile fast"
+cranelift-build = "build --config .cargo/config.fast.toml --profile fast"
+cranelift-test = "test --config .cargo/config.fast.toml --profile fast"
 cranelift-clippy = "clippy --config .cargo/config.fast.toml --profile fast"
-cranelift-run    = "run --config .cargo/config.fast.toml --profile fast"
+cranelift-run = "run --config .cargo/config.fast.toml --profile fast"
 
 # ==============================================================================
 # 2. TESTING, SANITIZERS & VERIFICATION
 # ==============================================================================
-mutants      = "mutants --test-tool nextest"
-insta        = "insta test --accept"
-hack         = "hack check --each-feature"
+mutants = "mutants --test-tool nextest"
+insta = "insta test --accept"
+hack-powerset = "hack check --feature-powerset --workspace --all-targets"
 
-t-miri       = "miri test"
-careful      = "careful test"
-asan         = "test -Zbuild-std -Zsanitizer=address --target x86_64-unknown-linux-gnu"
-tsan         = "test -Zbuild-std -Zsanitizer=thread --target x86_64-unknown-linux-gnu"
+t-miri = "miri test"
+careful = "careful test"
+asan = "test -Zbuild-std -Zsanitizer=address --target x86_64-unknown-linux-gnu"
+tsan = "test -Zbuild-std -Zsanitizer=thread --target x86_64-unknown-linux-gnu"
 
 # ==============================================================================
 # 3. CODE COVERAGE (cargo-llvm-cov)
 # ==============================================================================
-cov          = "llvm-cov --open"
-cov-report   = "llvm-cov --text"
-cov-summary  = "llvm-cov --summary-only"
-cov-lcov     = "llvm-cov --lcov --output-path lcov.info"
+cov = "llvm-cov --open"
+cov-report = "llvm-cov --text"
+cov-summary = "llvm-cov --summary-only"
+cov-lcov = "llvm-cov --lcov --output-path lcov.info"
 
 # ==============================================================================
 # 4. CODE INSPECTION, AST & ASSEMBLY
 # ==============================================================================
-x            = "expand"
-mir-dump     = "rustc -- --emit=mir"
-asm-fn       = "asm --rust"
-asm-llvm     = "asm --llvm"
-asm-mca      = "asm --mca"
+x = "expand"
+mir-dump = "rustc -- --emit=mir"
+asm-fn = "asm --rust"
+asm-llvm = "asm --llvm"
+asm-mca = "asm --mca"
 
 # ==============================================================================
 # 5. PROFILING & BINARY ANALYSIS
 # ==============================================================================
-fg           = "flamegraph --profile release"
-samply-rec   = "samply record --no-open"
-bloat-fns    = "bloat --release -n 20"
+fg = "flamegraph --profile release"
+samply-rec = "samply record --no-open"
+bloat-fns = "bloat --release -n 20"
 bloat-crates = "bloat --release --crates"
 
-size-dump    = "size --release -- -A"
-disasm       = "objdump --release -- --disassemble --no-show-raw-insn"
-symbols      = "nm --release -- --demangle"
+size-dump = "size --release -- -A"
+disasm = "objdump --release -- --disassemble --no-show-raw-insn"
+symbols = "nm --release -- --demangle"
 
 # ==============================================================================
 # 6. HYGIENE, SECURITY & DEPENDENCY AUDITING
 # ==============================================================================
-audit        = "deny check advisories"
-advisories   = "deny check advisories"
-deny-all     = "deny check"
-unused       = "machete"
-semver       = "semver-checks"
-public-api   = "public-api diff"
-outdated     = "outdated"
+audit = "deny check advisories"
+advisories = "deny check advisories"
+deny-all = "deny check"
+unused = "machete"
+semver = "semver-checks"
+public-api = "public-api diff"
+outdated = "outdated"
 
 # ==============================================================================
 # 7. TOOLCHAIN & DISK MAINTENANCE
 # ==============================================================================
-sweep-30     = "sweep --time 30"
-update-all   = "install-update -a"
+sweep-30 = "sweep --time 30"
+update-all = "install-update -a"

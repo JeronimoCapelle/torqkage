@@ -1,0 +1,7 @@
+exclude = ["target/**", ".tkg/**"]
+
+[formatting]
+indent_string = "    "
+column_width = 100
+align_entries = false
+reorder_keys = false

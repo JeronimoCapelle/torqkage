@@ -15,7 +15,4 @@ exclude_globs = [
     "crates/*/src/main.rs",
 ]
 
-exclude_re = [
-    "impl std::fmt::Display",
-    "impl Debug",
-]
+exclude_re = ["impl std::fmt::Display", "impl Debug"]

@@ -1,27 +1,23 @@
 //! # tkg
 //!
-//! Offline Ratatui 0.30 terminal control deck, fleet manager, and orchestration
-//! utility for `TorqKage`.
+//! Drop-in CLI utility and optional Ratatui (`--features tui`) dashboard for
+//! `TorqKage`.
 //!
 //! ## Overview
-//! `tkg` provides a full-terminal interactive TUI dashboard for managing the
-//! agent fleet, inspecting declarative MCP tools, viewing the compiler failure
-//! circuit breaker, and launching supervised agent sessions with automatic
-//! pre-flight gatekeeper checks and Jujutsu workspace isolation.
+//! `tkg` provides headless workspace setup (`init`, `doctor`, `add`),
+//! diagnostics, circuit-breaker controls, and agent session launching with
+//! pre-flight gatekeeper checks and optional Jujutsu workspace isolation.
+//! Compiling with `--features tui` adds the interactive control deck via
+//! `tkg ui`.
 //!
 //! ## Core Architecture
-//! - [`app`]: Central state machine handling keyboard navigation, tab
-//!   switching, and editing buffers.
-//! - [`launcher`]: Pre-launch validator and TTY suspension pipeline for
-//!   spawning child sessions.
-//! - [`model`]: In-memory models for agent frontmatter manifests and
-//!   declarative MCP tool definitions.
-//! - [`session`]: Reader querying conversation histories for session
-//!   resumption.
-//! - [`ui`]: Modular Ratatui rendering pipelines for the Fleet Matrix, Tool
-//!   Catalog, and Diagnostics.
-//! - [`vcs`]: Jujutsu and Git snapshotting helpers for automated rollbacks and
-//!   pre-save checkpoints.
+//! - `app`: Optional TUI state machine (`tui` feature).
+//! - [`cli`]: Headless `init`, `doctor`, and `add` CLI commands.
+//! - [`launcher`]: Pre-launch validator and runner pipeline.
+//! - [`model`]: In-memory models for agent manifests and declarative tools.
+//! - [`session`]: Reader querying conversation histories for session resumption.
+//! - `ui`: Optional Ratatui rendering pipeline (`tui` feature).
+//! - [`vcs`]: Jujutsu and Git snapshotting helpers.
 
 #![forbid(unsafe_code)]
 #![allow(
@@ -33,31 +29,40 @@
     reason = "CLI error diagnostics emit output to stderr"
 )]
 
+#[cfg(feature = "tui")]
 mod app;
+mod cli;
 mod installer;
 mod launcher;
+#[cfg(feature = "tui")]
 mod manual;
 mod model;
 mod session;
 mod summary;
+#[cfg(feature = "tui")]
 mod ui;
 mod vcs;
 
+#[cfg(feature = "tui")]
+use std::io::{self, stdout};
+#[cfg(feature = "tui")]
+use std::time::Duration;
 use std::{
-    io::{self, stdout},
     path::{Path, PathBuf},
     process::ExitCode,
-    time::Duration,
 };
 
+#[cfg(feature = "tui")]
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+#[cfg(feature = "tui")]
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tkg_common::WorkspaceResolver;
 
+#[cfg(feature = "tui")]
 use crate::app::{ActiveTab, App, FleetFocus};
 
 fn main() -> ExitCode {
@@ -71,15 +76,24 @@ fn main() -> ExitCode {
     let workspace_root = WorkspaceResolver::find_root(None).unwrap_or_else(|_| PathBuf::from("."));
 
     match command {
+        Some("init" | "setup") => cli::handle_init_cli(&workspace_root, &args),
+        Some("doctor" | "check") => cli::handle_doctor_cli(&workspace_root, &args),
+        Some("add") => cli::handle_add_cli(&workspace_root, &args),
+        Some("uninstall" | "remove") => cli::handle_uninstall_cli(&workspace_root, &args),
+        Some("--ui" | "ui" | "tui" | "deck") => run_tui_or_fail(workspace_root),
         Some("--status" | "status") => {
-            let app = match App::new(workspace_root) {
-                Ok(a) => a,
-                Err(e) => {
-                    eprintln!("🛑 [tkg] Failed to load configuration: {e}");
-                    return ExitCode::FAILURE;
+            let agents = model::discover_agents(&workspace_root);
+            let tools = match model::find_tools_config_path(&workspace_root) {
+                Some(path) => match model::load_tools_from_file(&path) {
+                    Ok(loaded) => loaded,
+                    Err(e) => {
+                        eprintln!("🛑 [tkg] Failed to load configuration: {e}");
+                        return ExitCode::FAILURE;
+                    },
                 },
+                None => Vec::new(),
             };
-            summary::print_fleet_status(&app.agents, &app.tools);
+            summary::print_fleet_status(&agents, &tools);
             ExitCode::SUCCESS
         },
         Some("--validate" | "validate") => {
@@ -122,10 +136,16 @@ fn main() -> ExitCode {
                     );
                     ExitCode::FAILURE
                 },
-                None => run_tui_or_fail(workspace_root),
+                None => {
+                    print_cli_usage();
+                    ExitCode::SUCCESS
+                },
             }
         },
-        _ => run_tui_or_fail(workspace_root),
+        _ => {
+            print_cli_usage();
+            ExitCode::SUCCESS
+        },
     }
 }
 
@@ -144,6 +164,7 @@ fn find_agent_arg(args: &[String]) -> Option<&str> {
     None
 }
 
+#[cfg(feature = "tui")]
 fn run_tui_or_fail(workspace_root: PathBuf) -> ExitCode {
     if let Err(err) = run_tui(workspace_root) {
         eprintln!("🛑 [tkg] TUI error: {err}");
@@ -151,6 +172,16 @@ fn run_tui_or_fail(workspace_root: PathBuf) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+#[cfg(not(feature = "tui"))]
+fn run_tui_or_fail(_workspace_root: PathBuf) -> ExitCode {
+    eprintln!(
+        "🛑 [tkg] Interactive TUI is an optional compile-time feature ('tui').\n\
+           Rebuild/install with: cargo install torqkage --features tui\n\
+           Or use headless commands: 'tkg init', 'tkg doctor', 'tkg add', 'tkg --status'."
+    );
+    ExitCode::FAILURE
 }
 
 fn handle_cli_launch(
@@ -274,337 +305,351 @@ fn handle_workspace_cli(workspace_root: &Path, args: &[String]) -> ExitCode {
 }
 
 fn print_cli_usage() {
-    println!(
-        "tkg: Offline Ratatui terminal configuration deck & agent launcher for TorqKage\n\
-         \n\
-         USAGE:\n\
-           tkg [OPTIONS]\n\
-           tkg launch <AGENT> [--sandbox] [--isolated]  (or tkg <AGENT> [--sandbox] [--isolated])\n\
-         \n\
-         OPTIONS:\n\
-           --status, status      Print ASCII agent fleet status & tool distribution matrix\n\
-           --validate, validate  Run pre-flight validation on TorqKage plugin and tools\n\
-           --launch, launch      Run pre-flight checks and launch interactive agent session with <AGENT>\n\
-           --sandbox             Launch agent session inside an isolated Bubblewrap OS container\n\
-           --isolated, --workspace Launch session inside isolated Jujutsu workspace (.tkg/workspaces/<agent>)\n\
-           reset-breaker         Reset the circuit breaker strike counter in .tkg/state/circuit_breaker.json\n\
-           inspect-breaker       Inspect the circuit breaker status, strikes, and error details\n\
-           workspace <subcmd>    Manage subagent workspaces (ensure <agent>, forget <agent>)\n\
-           --help, -h            Show this help reference\n\
-         \n\
-         INTERACTIVE TUI:\n\
-           Run without arguments in an interactive terminal to launch the visual policy deck.\n\
-           In TUI mode, press [Enter] on any agent to launch session directly.\n\
-           Shortcuts: [w] Workspace Isolation, [c] Reset CB, [p] Policy, [b] Sandbox, [g] Gate Tool\n"
-    );
+    println!(concat!(
+        "tkg: Drop-in firewall & sandboxed CLI-to-MCP runtime for coding agents\n",
+        "\n",
+        "QUICKSTART COMMANDS:\n",
+        "  tkg init [HARNESS] [--save] [--list]    Inject MCP & guardrail hooks into your harness\n",
+        "  tkg doctor [--strict]                   Verify harness hooks, MCP config, and binaries\n",
+        "  tkg add <NAME> [OPTS] -- <CMD...>       Wrap any CLI binary into .tkg/tools.toml\n",
+        "  tkg uninstall [HARNESS] [--purge]       Remove TorqKage hooks & MCP entries cleanly\n",
+        "\n",
+        "GATEKEEPER & DIAGNOSTICS:\n",
+        "  --status, status      Print agent fleet status & tool distribution matrix\n",
+        "  --validate, validate  Run pre-flight validation on plugin & tool schemas\n",
+        "  reset-breaker         Reset the circuit breaker strike counter\n",
+        "  inspect-breaker       Inspect circuit breaker strikes and error details\n",
+        "  --help, -h            Show this help reference\n",
+        "\n",
+        "OPTIONAL POWER FEATURES (OPT-IN / ISOLATION):\n",
+        "  ui, tui, deck         Open interactive Ratatui deck (requires '--features tui')\n",
+        "  launch <AGENT>        Launch an agent session (--sandbox, --isolated)\n",
+        "  workspace <subcmd>    Manage isolated Jujutsu workspaces (ensure <agent>, forget <agent>)\n",
+    ));
 }
 
+#[cfg(feature = "tui")]
 fn run_tui(workspace_root: PathBuf) -> Result<(), String> {
-    let mut app = App::new(workspace_root)?;
-
-    // Set up terminal panic hook to guarantee terminal cleanup
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        _ = disable_raw_mode();
-        _ = execute!(stdout(), LeaveAlternateScreen);
-        default_hook(panic_info);
-    }));
-
-    // Initialize terminal
-    enable_raw_mode().map_err(|e| format!("Failed to enable raw mode: {e}"))?;
-    let mut stdout_handle = stdout();
-    execute!(stdout_handle, EnterAlternateScreen)
-        .map_err(|e| format!("Failed to enter alternate screen: {e}"))?;
-
-    let backend = CrosstermBackend::new(stdout_handle);
-    let mut terminal =
-        Terminal::new(backend).map_err(|e| format!("Failed to initialize terminal: {e}"))?;
-
-    let res = event_loop(&mut terminal, &mut app);
-
-    // Restore terminal
-    _ = disable_raw_mode();
-    _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
-    _ = terminal.show_cursor();
-
-    res
+    tui_loop::run_tui(workspace_root)
 }
 
-fn event_loop(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> Result<(), String> {
-    while !app.should_quit {
-        // Handle pending launch request if one was triggered
-        if let Some((agent_name, resume_conv)) = app.pending_launch.take() {
-            if let Some(agent) = app.agents.iter().find(|a| a.name == agent_name).cloned() {
-                match launcher::launch_agent_interactive(
-                    terminal,
-                    &app.workspace_root,
-                    &agent,
-                    app.sandbox_enabled(),
-                    app.isolated_workspace(),
-                    resume_conv.as_deref(),
-                ) {
-                    Ok(status) => {
-                        // Reload agents from disk in case tools were modified
-                        app.agents = model::discover_agents(&app.workspace_root);
-                        app.refresh_selected_agent_session();
-                        app.refresh_circuit_breaker();
-                        let harness = app.runner_harness();
-                        app.status_message = Some((
-                            format!(
-                                "✔ Returned from {harness} session with agent '{agent_name}' ({status})"
-                            ),
-                            false,
-                        ));
+#[cfg(feature = "tui")]
+mod tui_loop {
+    use super::{
+        ActiveTab, App, CrosstermBackend, Duration, EnterAlternateScreen, Event, FleetFocus,
+        KeyCode, KeyEventKind, KeyModifiers, LeaveAlternateScreen, PathBuf, Terminal,
+        disable_raw_mode, enable_raw_mode, event, execute, io, launcher, model, stdout, ui,
+    };
+
+    pub(super) fn run_tui(workspace_root: PathBuf) -> Result<(), String> {
+        let mut app = App::new(workspace_root)?;
+
+        // Set up terminal panic hook to guarantee terminal cleanup
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            _ = disable_raw_mode();
+            _ = execute!(stdout(), LeaveAlternateScreen);
+            default_hook(panic_info);
+        }));
+
+        // Initialize terminal
+        enable_raw_mode().map_err(|e| format!("Failed to enable raw mode: {e}"))?;
+        let mut stdout_handle = stdout();
+        execute!(stdout_handle, EnterAlternateScreen)
+            .map_err(|e| format!("Failed to enter alternate screen: {e}"))?;
+
+        let backend = CrosstermBackend::new(stdout_handle);
+        let mut terminal =
+            Terminal::new(backend).map_err(|e| format!("Failed to initialize terminal: {e}"))?;
+
+        let res = event_loop(&mut terminal, &mut app);
+
+        // Restore terminal
+        _ = disable_raw_mode();
+        _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+        _ = terminal.show_cursor();
+
+        res
+    }
+
+    fn event_loop(
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        app: &mut App,
+    ) -> Result<(), String> {
+        while !app.should_quit {
+            // Handle pending launch request if one was triggered
+            if let Some((agent_name, resume_conv)) = app.pending_launch.take() {
+                if let Some(agent) = app.agents.iter().find(|a| a.name == agent_name).cloned() {
+                    match launcher::launch_agent_interactive(
+                        terminal,
+                        &app.workspace_root,
+                        &agent,
+                        app.sandbox_enabled(),
+                        app.isolated_workspace(),
+                        resume_conv.as_deref(),
+                    ) {
+                        Ok(status) => {
+                            // Reload agents from disk in case tools were modified
+                            app.agents = model::discover_agents(&app.workspace_root);
+                            app.refresh_selected_agent_session();
+                            app.refresh_circuit_breaker();
+                            let harness = app.runner_harness();
+                            app.status_message = Some((
+                                format!(
+                                    "✔ Returned from {harness} session with agent '{agent_name}' ({status})"
+                                ),
+                                false,
+                            ));
+                        },
+                        Err(err) => {
+                            app.validation_modal = Some((false, err));
+                            app.status_message = Some((
+                                "❌ Pre-launch check failed! View diagnostic modal.".to_owned(),
+                                true,
+                            ));
+                        },
+                    }
+                }
+                continue;
+            }
+
+            terminal
+                .draw(|f| ui::draw(f, app))
+                .map_err(|e| format!("Draw error: {e}"))?;
+
+            if event::poll(Duration::from_millis(100)).map_err(|e| format!("Poll error: {e}"))? {
+                match event::read().map_err(|e| format!("Read error: {e}"))? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        handle_key_event(app, key.code, key.modifiers);
                     },
-                    Err(err) => {
-                        app.validation_modal = Some((false, err));
-                        app.status_message = Some((
-                            "❌ Pre-launch check failed! View diagnostic modal.".to_owned(),
-                            true,
-                        ));
-                    },
+                    _ => {},
                 }
             }
-            continue;
         }
 
-        terminal
-            .draw(|f| ui::draw(f, app))
-            .map_err(|e| format!("Draw error: {e}"))?;
+        Ok(())
+    }
 
-        if event::poll(Duration::from_millis(100)).map_err(|e| format!("Poll error: {e}"))? {
-            match event::read().map_err(|e| format!("Read error: {e}"))? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    handle_key_event(app, key.code, key.modifiers);
+    pub(super) fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+        // 1. Modals capture keys first
+        if app.show_help {
+            if matches!(
+                code,
+                KeyCode::Esc | KeyCode::Enter | KeyCode::F(1) | KeyCode::Char('q')
+            ) {
+                app.show_help = false;
+            }
+            return;
+        }
+
+        if app.validation_modal.is_some() {
+            match code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    app.validation_modal = None;
+                },
+                KeyCode::F(4) | KeyCode::Char('r') => {
+                    app.rollback();
                 },
                 _ => {},
             }
+            return;
+        }
+
+        // 2. Global Shortcuts
+        if handle_global_shortcuts(app, code, modifiers) {
+            return;
+        }
+
+        // 3. Tab-Specific Navigation
+        match app.active_tab {
+            ActiveTab::FleetOverview => handle_fleet_overview_keys(app, code),
+            ActiveTab::ToolCatalog => handle_tool_catalog_keys(app, code),
+            ActiveTab::DirectivesEditor => handle_directives_editor_keys(app, code),
+            ActiveTab::Manual => handle_manual_keys(app, code),
         }
     }
 
-    Ok(())
-}
-
-fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
-    // 1. Modals capture keys first
-    if app.show_help {
-        if matches!(
-            code,
-            KeyCode::Esc | KeyCode::Enter | KeyCode::F(1) | KeyCode::Char('q')
-        ) {
-            app.show_help = false;
-        }
-        return;
-    }
-
-    if app.validation_modal.is_some() {
+    fn handle_global_shortcuts(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> bool {
         match code {
-            KeyCode::Esc | KeyCode::Enter => {
-                app.validation_modal = None;
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.should_quit = true;
+                true
             },
-            KeyCode::F(4) | KeyCode::Char('r') => {
+            KeyCode::Char('q') => {
+                app.should_quit = true;
+                true
+            },
+            KeyCode::Char('n') => {
+                app.request_launch(false);
+                true
+            },
+            KeyCode::F(1) | KeyCode::Char('?') => {
+                app.toggle_manual();
+                true
+            },
+            KeyCode::Char('i') => {
+                app.run_installer_and_diagnostics();
+                true
+            },
+            KeyCode::F(2) | KeyCode::Char('S' | 's') => {
+                app.save_and_validate();
+                true
+            },
+            KeyCode::F(8) | KeyCode::Char('b') => {
+                app.toggle_sandbox();
+                true
+            },
+            KeyCode::Char('w') => {
+                app.toggle_isolated_workspace();
+                true
+            },
+            KeyCode::Char('c' | 'C' | 'K') => {
+                app.reset_circuit_breaker();
+                true
+            },
+            KeyCode::Char('p') => {
+                app.cycle_selected_agent_policy();
+                true
+            },
+            KeyCode::Char('g') if app.active_tab != ActiveTab::Manual => {
+                app.toggle_tool_permission_gate();
+                true
+            },
+            KeyCode::F(4) | KeyCode::Char('u' | 'U') => {
                 app.rollback();
+                true
+            },
+            KeyCode::Tab => {
+                app.next_tab();
+                true
+            },
+            KeyCode::BackTab => {
+                app.prev_tab();
+                true
+            },
+            KeyCode::Char('1') => {
+                app.active_tab = ActiveTab::FleetOverview;
+                true
+            },
+            KeyCode::Char('2') => {
+                app.active_tab = ActiveTab::ToolCatalog;
+                true
+            },
+            KeyCode::Char('3') => {
+                app.active_tab = ActiveTab::DirectivesEditor;
+                true
+            },
+            KeyCode::Char('4') => {
+                app.active_tab = ActiveTab::Manual;
+                true
+            },
+            _ => false,
+        }
+    }
+
+    fn handle_fleet_overview_keys(app: &mut App, code: KeyCode) {
+        match code {
+            KeyCode::Left | KeyCode::Char('h') => {
+                app.fleet_focus = FleetFocus::AgentList;
+            },
+            KeyCode::Right | KeyCode::Char('l') => {
+                app.fleet_focus = FleetFocus::ToolList;
+            },
+            KeyCode::Up | KeyCode::Char('k') => match app.fleet_focus {
+                FleetFocus::AgentList => app.prev_agent(),
+                FleetFocus::ToolList => app.prev_tool(),
+            },
+            KeyCode::Down | KeyCode::Char('j') => match app.fleet_focus {
+                FleetFocus::AgentList => app.next_agent(),
+                FleetFocus::ToolList => app.next_tool(),
+            },
+            KeyCode::Enter | KeyCode::Char('r') => match app.fleet_focus {
+                FleetFocus::AgentList => app.request_launch(true),
+                FleetFocus::ToolList => app.toggle_current_tool(),
+            },
+            KeyCode::Char('n') => match app.fleet_focus {
+                FleetFocus::AgentList => app.request_launch(false),
+                FleetFocus::ToolList => {},
+            },
+            KeyCode::Char(' ') => match app.fleet_focus {
+                FleetFocus::AgentList => app.toggle_fleet_focus(),
+                FleetFocus::ToolList => app.toggle_current_tool(),
             },
             _ => {},
         }
-        return;
     }
 
-    // 2. Global Shortcuts
-    if handle_global_shortcuts(app, code, modifiers) {
-        return;
+    fn handle_tool_catalog_keys(app: &mut App, code: KeyCode) {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => app.prev_tool(),
+            KeyCode::Down | KeyCode::Char('j') => app.next_tool(),
+            KeyCode::PageUp => {
+                for _ in 0..10 {
+                    app.prev_tool();
+                }
+            },
+            KeyCode::PageDown => {
+                for _ in 0..10 {
+                    app.next_tool();
+                }
+            },
+            _ => {},
+        }
     }
 
-    // 3. Tab-Specific Navigation
-    match app.active_tab {
-        ActiveTab::FleetOverview => handle_fleet_overview_keys(app, code),
-        ActiveTab::ToolCatalog => handle_tool_catalog_keys(app, code),
-        ActiveTab::DirectivesEditor => handle_directives_editor_keys(app, code),
-        ActiveTab::Manual => handle_manual_keys(app, code),
+    const fn handle_directives_editor_keys(app: &mut App, code: KeyCode) {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.directives_scroll = app.directives_scroll.saturating_sub(1);
+            },
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.directives_scroll = app.directives_scroll.saturating_add(1);
+            },
+            KeyCode::PageUp => {
+                app.directives_scroll = app.directives_scroll.saturating_sub(10);
+            },
+            KeyCode::PageDown => {
+                app.directives_scroll = app.directives_scroll.saturating_add(10);
+            },
+            _ => {},
+        }
     }
-}
 
-fn handle_global_shortcuts(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> bool {
-    match code {
-        KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-            app.should_quit = true;
-            true
-        },
-        KeyCode::Char('q') => {
-            app.should_quit = true;
-            true
-        },
-        KeyCode::Char('n') => {
-            app.request_launch(false);
-            true
-        },
-        KeyCode::F(1) | KeyCode::Char('?') => {
-            app.toggle_manual();
-            true
-        },
-        KeyCode::Char('i') => {
-            app.run_installer_and_diagnostics();
-            true
-        },
-        KeyCode::F(2) | KeyCode::Char('S' | 's') => {
-            app.save_and_validate();
-            true
-        },
-        KeyCode::F(8) | KeyCode::Char('b') => {
-            app.toggle_sandbox();
-            true
-        },
-        KeyCode::Char('w') => {
-            app.toggle_isolated_workspace();
-            true
-        },
-        KeyCode::Char('c' | 'C' | 'K') => {
-            app.reset_circuit_breaker();
-            true
-        },
-        KeyCode::Char('p') => {
-            app.cycle_selected_agent_policy();
-            true
-        },
-        KeyCode::Char('g') if app.active_tab != ActiveTab::Manual => {
-            app.toggle_tool_permission_gate();
-            true
-        },
-        KeyCode::F(4) | KeyCode::Char('u' | 'U') => {
-            app.rollback();
-            true
-        },
-        KeyCode::Tab => {
-            app.next_tab();
-            true
-        },
-        KeyCode::BackTab => {
-            app.prev_tab();
-            true
-        },
-        KeyCode::Char('1') => {
-            app.active_tab = ActiveTab::FleetOverview;
-            true
-        },
-        KeyCode::Char('2') => {
-            app.active_tab = ActiveTab::ToolCatalog;
-            true
-        },
-        KeyCode::Char('3') => {
-            app.active_tab = ActiveTab::DirectivesEditor;
-            true
-        },
-        KeyCode::Char('4') => {
-            app.active_tab = ActiveTab::Manual;
-            true
-        },
-        _ => false,
-    }
-}
-
-fn handle_fleet_overview_keys(app: &mut App, code: KeyCode) {
-    match code {
-        KeyCode::Left | KeyCode::Char('h') => {
-            app.fleet_focus = FleetFocus::AgentList;
-        },
-        KeyCode::Right | KeyCode::Char('l') => {
-            app.fleet_focus = FleetFocus::ToolList;
-        },
-        KeyCode::Up | KeyCode::Char('k') => match app.fleet_focus {
-            FleetFocus::AgentList => app.prev_agent(),
-            FleetFocus::ToolList => app.prev_tool(),
-        },
-        KeyCode::Down | KeyCode::Char('j') => match app.fleet_focus {
-            FleetFocus::AgentList => app.next_agent(),
-            FleetFocus::ToolList => app.next_tool(),
-        },
-        KeyCode::Enter | KeyCode::Char('r') => match app.fleet_focus {
-            FleetFocus::AgentList => app.request_launch(true),
-            FleetFocus::ToolList => app.toggle_current_tool(),
-        },
-        KeyCode::Char('n') => match app.fleet_focus {
-            FleetFocus::AgentList => app.request_launch(false),
-            FleetFocus::ToolList => {},
-        },
-        KeyCode::Char(' ') => match app.fleet_focus {
-            FleetFocus::AgentList => app.toggle_fleet_focus(),
-            FleetFocus::ToolList => app.toggle_current_tool(),
-        },
-        _ => {},
-    }
-}
-
-fn handle_tool_catalog_keys(app: &mut App, code: KeyCode) {
-    match code {
-        KeyCode::Up | KeyCode::Char('k') => app.prev_tool(),
-        KeyCode::Down | KeyCode::Char('j') => app.next_tool(),
-        KeyCode::PageUp => {
-            for _ in 0..10 {
-                app.prev_tool();
-            }
-        },
-        KeyCode::PageDown => {
-            for _ in 0..10 {
-                app.next_tool();
-            }
-        },
-        _ => {},
-    }
-}
-
-const fn handle_directives_editor_keys(app: &mut App, code: KeyCode) {
-    match code {
-        KeyCode::Up | KeyCode::Char('k') => {
-            app.directives_scroll = app.directives_scroll.saturating_sub(1);
-        },
-        KeyCode::Down | KeyCode::Char('j') => {
-            app.directives_scroll = app.directives_scroll.saturating_add(1);
-        },
-        KeyCode::PageUp => {
-            app.directives_scroll = app.directives_scroll.saturating_sub(10);
-        },
-        KeyCode::PageDown => {
-            app.directives_scroll = app.directives_scroll.saturating_add(10);
-        },
-        _ => {},
-    }
-}
-
-fn handle_manual_keys(app: &mut App, code: KeyCode) {
-    match code {
-        KeyCode::Char('[' | 'h') | KeyCode::Left => {
-            app.prev_manual_section();
-        },
-        KeyCode::Char(']' | 'l') | KeyCode::Right => {
-            app.next_manual_section();
-        },
-        KeyCode::Up | KeyCode::Char('k') => {
-            app.manual_scroll = app.manual_scroll.saturating_sub(1);
-        },
-        KeyCode::Down | KeyCode::Char('j') => {
-            app.manual_scroll = app.manual_scroll.saturating_add(1);
-        },
-        KeyCode::PageUp => {
-            app.manual_scroll = app.manual_scroll.saturating_sub(10);
-        },
-        KeyCode::PageDown => {
-            app.manual_scroll = app.manual_scroll.saturating_add(10);
-        },
-        KeyCode::Home | KeyCode::Char('g') => {
-            app.manual_scroll = 0;
-        },
-        KeyCode::Esc | KeyCode::Enter => {
-            app.toggle_manual();
-        },
-        _ => {},
+    fn handle_manual_keys(app: &mut App, code: KeyCode) {
+        match code {
+            KeyCode::Char('[' | 'h') | KeyCode::Left => {
+                app.prev_manual_section();
+            },
+            KeyCode::Char(']' | 'l') | KeyCode::Right => {
+                app.next_manual_section();
+            },
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.manual_scroll = app.manual_scroll.saturating_sub(1);
+            },
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.manual_scroll = app.manual_scroll.saturating_add(1);
+            },
+            KeyCode::PageUp => {
+                app.manual_scroll = app.manual_scroll.saturating_sub(10);
+            },
+            KeyCode::PageDown => {
+                app.manual_scroll = app.manual_scroll.saturating_add(10);
+            },
+            KeyCode::Home | KeyCode::Char('g') => {
+                app.manual_scroll = 0;
+            },
+            KeyCode::Esc | KeyCode::Enter => {
+                app.toggle_manual();
+            },
+            _ => {},
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_find_agent_arg_is_order_independent() {
         let v = |xs: &[&str]| xs.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
@@ -623,8 +668,7 @@ mod tests {
         assert_eq!(find_agent_arg(&v(&["tkg", "--sandbox"])), None);
     }
 
-    use super::*;
-
+    #[cfg(feature = "tui")]
     #[test]
     fn test_k_navigates_up_and_does_not_reset_breaker() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -634,41 +678,43 @@ mod tests {
         app.selected_agent_idx = 1;
         let initial_status = app.status_message.clone();
 
-        handle_key_event(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
+        tui_loop::handle_key_event(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
 
         assert_eq!(app.selected_agent_idx, 0);
         assert_eq!(app.status_message, initial_status);
     }
 
+    #[cfg(feature = "tui")]
     #[test]
     fn test_c_and_shift_k_reset_circuit_breaker() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut app = App::new(root).expect("create app");
 
-        handle_key_event(&mut app, KeyCode::Char('c'), KeyModifiers::NONE);
+        tui_loop::handle_key_event(&mut app, KeyCode::Char('c'), KeyModifiers::NONE);
         let status = app.status_message.as_ref().map(|(msg, _)| msg.clone());
         assert!(status.unwrap().contains("Circuit Breaker RESET"));
 
-        handle_key_event(&mut app, KeyCode::Char('K'), KeyModifiers::NONE);
+        tui_loop::handle_key_event(&mut app, KeyCode::Char('K'), KeyModifiers::NONE);
         let status_k = app.status_message.as_ref().map(|(msg, _)| msg.clone());
         assert!(status_k.unwrap().contains("Circuit Breaker RESET"));
     }
 
+    #[cfg(feature = "tui")]
     #[test]
     fn test_manual_scrolling_and_home_keys() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut app = App::new(root).expect("create app");
         app.active_tab = ActiveTab::Manual;
 
-        handle_key_event(&mut app, KeyCode::Char('j'), KeyModifiers::NONE);
+        tui_loop::handle_key_event(&mut app, KeyCode::Char('j'), KeyModifiers::NONE);
         assert_eq!(app.manual_scroll, 1);
 
-        handle_key_event(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
+        tui_loop::handle_key_event(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
         assert_eq!(app.manual_scroll, 0);
 
-        handle_key_event(&mut app, KeyCode::PageDown, KeyModifiers::NONE);
+        tui_loop::handle_key_event(&mut app, KeyCode::PageDown, KeyModifiers::NONE);
         assert_eq!(app.manual_scroll, 10);
-        handle_key_event(&mut app, KeyCode::Char('g'), KeyModifiers::NONE);
+        tui_loop::handle_key_event(&mut app, KeyCode::Char('g'), KeyModifiers::NONE);
         assert_eq!(app.manual_scroll, 0);
     }
 }

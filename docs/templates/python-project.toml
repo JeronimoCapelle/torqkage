@@ -21,12 +21,7 @@ ignored_paths = [
 ]
 
 [sandbox]
-bind_mounts = [
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".venv",
-]
+bind_mounts = [".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv"]
 
 [gates.compilation]
 command = ["uv", "run", "mypy", "."]

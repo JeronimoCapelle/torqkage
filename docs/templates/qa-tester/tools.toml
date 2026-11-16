@@ -10,8 +10,13 @@ enforce_sandbox = true
 command = ["cargo", "fuzz", "run"]
 args = [
     { name = "target", required = true, regex = "^[a-zA-Z0-9_]+$", description = "Fuzz target name" },
-    { name = "sanitizer", required = false, default = "address", enum = ["address", "memory", "thread", "undefined"], flag = "-s", description = "LLVM sanitizer to attach" },
-    { name = "max_time", required = false, default = "30", flag = "-max_total_time", regex = "^[0-9]+$", description = "Timeout in seconds" }
+    { name = "sanitizer", required = false, default = "address", enum = [
+        "address",
+        "memory",
+        "thread",
+        "undefined",
+    ], flag = "-s", description = "LLVM sanitizer to attach" },
+    { name = "max_time", required = false, default = "30", flag = "-max_total_time", regex = "^[0-9]+$", description = "Timeout in seconds" },
 ]
 output_capture = "stderr"
 truncate_lines = 100

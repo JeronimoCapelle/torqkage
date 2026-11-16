@@ -2,7 +2,8 @@
 //!
 //! The [`Harness`] trait is the single capability-driven seam between
 //! `TorqKage` and an agent execution harness (Antigravity, `OpenCode`, Claude
-//! Code, Cursor, or any custom CLI). Every harness concern — static flags and
+//! Code, Cursor, `OpenAI` Codex, Gemini CLI, GitHub Copilot, VS Code, Windsurf,
+//! Roo Code, Cline, or any custom CLI). Every harness concern — static flags and
 //! directory layout, [`HarnessCapabilities`], hook wire dialect
 //! ([`HookDialect`]), session discovery ([`SessionMeta`]), spawn command
 //! assembly, and config injection — lives in an implementation of this trait.
@@ -22,10 +23,14 @@ use std::{
 use crate::{
     error::TkgError,
     harness_install,
-    hook_dialect::{CLAUDE_CODE_DIALECT, HookDialect, PROTO_JSON_DIALECT},
+    hook_dialect::{
+        CLAUDE_CODE_DIALECT, CURSOR_DIALECT, GEMINI_CLI_DIALECT, GITHUB_COPILOT_DIALECT,
+        HookDialect, PROTO_JSON_DIALECT,
+    },
     project::{ProjectConfig, ProjectRunnerConfig},
     sessions::{
-        SessionMeta, discover_claude_sessions_in, discover_generic_state_sessions,
+        SessionMeta, discover_claude_sessions_in, discover_codex_sessions_in,
+        discover_cursor_sessions_in, discover_gemini_sessions_in, discover_generic_state_sessions,
         discover_opencode_sessions,
     },
 };
@@ -55,21 +60,50 @@ pub fn local_plugin_rel_dir() -> PathBuf {
 }
 
 /// Infers an execution harness identifier from environment variables or
-/// harness-specific workspace directories (`.claude`, `.opencode`, `.gemini`,
-/// or `.cursor/mcp.json`).
+/// harness-specific workspace directories and config files.
 #[must_use]
 pub fn detect_workspace_harness(workspace_root: &Path) -> Option<&'static str> {
     if std::env::var_os("CLAUDE_PROJECT_DIR").is_some() || workspace_root.join(".claude").is_dir() {
         return Some("claude");
     }
+    if workspace_root.join(".codex").is_dir() {
+        return Some("codex");
+    }
     if workspace_root.join(".opencode").is_dir() {
         return Some("opencode");
+    }
+    if std::env::var_os("AGY_AGENT").is_some()
+        || std::env::var_os("AGY_OUTER_SANDBOX").is_some()
+        || workspace_root.join(".gemini/agents").is_dir()
+    {
+        return Some("agy");
+    }
+    if workspace_root.join(".gemini/settings.json").is_file() {
+        return Some("gemini");
     }
     if workspace_root.join(".gemini").is_dir() {
         return Some("agy");
     }
-    if workspace_root.join(".cursor").join("mcp.json").is_file() {
+    if workspace_root.join(".cursor/mcp.json").is_file()
+        || workspace_root.join(".cursor/hooks.json").is_file()
+        || workspace_root.join(".cursor").is_dir()
+    {
         return Some("cursor");
+    }
+    if workspace_root.join(".github/hooks").is_dir() {
+        return Some("github-copilot");
+    }
+    if workspace_root.join(".vscode/mcp.json").is_file() {
+        return Some("vscode");
+    }
+    if workspace_root.join(".roo").is_dir() {
+        return Some("roo");
+    }
+    if workspace_root.join(".cline").is_dir() || workspace_root.join(".clinerules").is_file() {
+        return Some("cline");
+    }
+    if workspace_root.join(".windsurf").is_dir() {
+        return Some("windsurf");
     }
     None
 }
@@ -220,6 +254,26 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
         harness_install::register_custom_mcp_config(workspace_root).map_err(TkgError::Workspace)
     }
 
+    /// Whether `inject_configs` / `eject_configs` modifies user-global state
+    /// outside `workspace_root` (e.g., Windsurf, Cline, or Antigravity).
+    fn has_global_config(&self) -> bool {
+        false
+    }
+
+    /// Removes `TorqKage` MCP server, hook entries, and empty `TorqKage` config
+    /// files for this harness while preserving all existing user entries.
+    ///
+    /// # Errors
+    /// Returns [`TkgError`] if existing configuration files cannot be parsed,
+    /// updated, or removed.
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_custom_mcp_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
     /// Constructs the spawn [`Command`] for launching this harness with
     /// workspace environment, optional agent selection, prompt, resume ID, and
     /// sandbox flags.
@@ -237,57 +291,84 @@ pub trait Harness: Send + Sync + std::fmt::Debug {
         sandbox: bool,
         env_vars: &BTreeMap<String, String>,
     ) -> Command {
-        let binary = runner.resolved_binary();
-        let mut cmd = Command::new(&binary);
-
-        for (k, v) in env_vars {
-            cmd.env(k, v);
-        }
-
-        if let Some(custom_cmd) = &runner.command
-            && let Some(sub_args) = custom_cmd.get(1..)
-        {
-            for arg in sub_args {
-                if arg == "{agent}"
-                    && let Some(agent) = agent_name
-                {
-                    cmd.arg(agent);
-                } else if (arg == "{conversation}" || arg == "{session}")
-                    && let Some(cid) = resume_session_id
-                {
-                    cmd.arg(cid);
-                } else if arg == "{prompt}"
-                    && let Some(p) = prompt
-                {
-                    cmd.arg(p);
-                } else {
-                    cmd.arg(arg);
-                }
-            }
-        } else {
-            if sandbox && let Some(flag) = runner.resolved_sandbox_flag() {
-                cmd.arg(flag);
-            }
-            if let Some(conv_id) = resume_session_id {
-                if let Some(flag) = runner.resolved_resume_flag() {
-                    cmd.arg(flag).arg(conv_id);
-                }
-            } else if let Some(agent) = agent_name
-                && let Some(flag) = runner.resolved_agent_flag()
-            {
-                cmd.arg(flag).arg(agent);
-            }
-            if let Some(p) = prompt {
-                cmd.arg(p);
-            }
-        }
-
-        for extra in &runner.extra_args {
-            cmd.arg(extra);
-        }
-
-        cmd
+        build_spawn_cmd_default(
+            runner,
+            agent_name,
+            prompt,
+            resume_session_id,
+            sandbox,
+            env_vars,
+            None,
+        )
     }
+}
+
+#[allow(
+    clippy::literal_string_with_formatting_args,
+    reason = "Command template placeholders like {agent}, {conversation}, and {prompt} are not Rust format strings"
+)]
+fn build_spawn_cmd_default(
+    runner: &ProjectRunnerConfig,
+    agent_name: Option<&str>,
+    prompt: Option<&str>,
+    resume_session_id: Option<&str>,
+    sandbox: bool,
+    env_vars: &BTreeMap<String, String>,
+    prompt_flag: Option<&str>,
+) -> Command {
+    let binary = runner.resolved_binary();
+    let mut cmd = Command::new(&binary);
+
+    for (k, v) in env_vars {
+        cmd.env(k, v);
+    }
+
+    if let Some(custom_cmd) = &runner.command
+        && let Some(sub_args) = custom_cmd.get(1..)
+    {
+        for arg in sub_args {
+            if arg == "{agent}"
+                && let Some(agent) = agent_name
+            {
+                cmd.arg(agent);
+            } else if (arg == "{conversation}" || arg == "{session}")
+                && let Some(cid) = resume_session_id
+            {
+                cmd.arg(cid);
+            } else if arg == "{prompt}"
+                && let Some(p) = prompt
+            {
+                cmd.arg(p);
+            } else {
+                cmd.arg(arg);
+            }
+        }
+    } else {
+        if sandbox && let Some(flag) = runner.resolved_sandbox_flag() {
+            cmd.arg(flag);
+        }
+        if let Some(conv_id) = resume_session_id {
+            if let Some(flag) = runner.resolved_resume_flag() {
+                cmd.arg(flag).arg(conv_id);
+            }
+        } else if let Some(agent) = agent_name
+            && let Some(flag) = runner.resolved_agent_flag()
+        {
+            cmd.arg(flag).arg(agent);
+        }
+        if let Some(p) = prompt {
+            if let Some(pf) = prompt_flag {
+                cmd.arg(pf);
+            }
+            cmd.arg(p);
+        }
+    }
+
+    for extra in &runner.extra_args {
+        cmd.arg(extra);
+    }
+
+    cmd
 }
 
 /// Google Antigravity (`agy`).
@@ -423,6 +504,18 @@ impl Harness for Antigravity {
         harness_install::install_plugin_interactive(workspace_root, runner)
             .map_err(TkgError::Workspace)
     }
+
+    fn has_global_config(&self) -> bool {
+        true
+    }
+
+    fn eject_configs(
+        &self,
+        _workspace_root: &Path,
+        runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_plugin_dir(runner).map_err(TkgError::Workspace)
+    }
 }
 
 /// `OpenCode`.
@@ -497,6 +590,14 @@ impl Harness for OpenCode {
         _runner: &ProjectRunnerConfig,
     ) -> Result<String, TkgError> {
         harness_install::register_opencode_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_opencode_config(workspace_root).map_err(TkgError::Workspace)
     }
 }
 
@@ -576,9 +677,18 @@ impl Harness for ClaudeCode {
     ) -> Result<String, TkgError> {
         harness_install::register_claude_config(workspace_root).map_err(TkgError::Workspace)
     }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_claude_config(workspace_root).map_err(TkgError::Workspace)
+    }
 }
 
-/// Cursor IDE / CLI (MCP-native; uses in-band MCP circuit breaker seatbelt).
+/// Cursor IDE / CLI (`agent`, `.cursor/mcp.json`, `.cursor/hooks.json`, and
+/// JSONL transcripts under `~/.cursor/projects`).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Cursor;
 
@@ -595,7 +705,18 @@ impl Harness for Cursor {
     }
 
     fn capabilities(&self) -> HarnessCapabilities {
-        HarnessCapabilities::NATIVE_MCP
+        HarnessCapabilities::NATIVE_HOOKS
+            | HarnessCapabilities::SESSION_RESUME
+            | HarnessCapabilities::HEADLESS_SPAWN
+            | HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn default_binary(&self) -> String {
+        "agent".to_owned()
+    }
+
+    fn agent_flag(&self) -> Option<&'static str> {
+        None
     }
 
     fn workspace_dir(&self) -> Option<String> {
@@ -610,12 +731,288 @@ impl Harness for Cursor {
         vec![home.join(".cursor/agents")]
     }
 
+    fn hook_dialect(&self) -> &'static dyn HookDialect {
+        &CURSOR_DIALECT
+    }
+
+    fn discover_sessions(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionMeta>, TkgError> {
+        if let Some(home_path) = home_dir() {
+            let projects_dir = home_path.join(".cursor/projects");
+            let sessions = discover_cursor_sessions_in(&projects_dir, agent_name, workspace_root);
+            if !sessions.is_empty() {
+                return Ok(sessions);
+            }
+        }
+        Ok(discover_generic_state_sessions(agent_name, workspace_root))
+    }
+
     fn config_status(
         &self,
         workspace_root: &Path,
         _runner: &ProjectRunnerConfig,
     ) -> (PathBuf, bool, bool) {
-        let p = workspace_root.join(".cursor/mcp.json");
+        let mcp_path = workspace_root.join(".cursor/mcp.json");
+        let hooks_path = workspace_root.join(".cursor/hooks.json");
+        let exists = mcp_path.is_file() && hooks_path.is_file();
+        (mcp_path, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_cursor_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_cursor_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn build_spawn_cmd(
+        &self,
+        _workspace_root: &Path,
+        runner: &ProjectRunnerConfig,
+        agent_name: Option<&str>,
+        prompt: Option<&str>,
+        resume_session_id: Option<&str>,
+        sandbox: bool,
+        env_vars: &BTreeMap<String, String>,
+    ) -> Command {
+        build_spawn_cmd_default(
+            runner,
+            agent_name,
+            prompt,
+            resume_session_id,
+            sandbox,
+            env_vars,
+            Some("-p"),
+        )
+    }
+}
+
+/// `OpenAI` Codex CLI (`.codex/config.toml`, `.codex/hooks.json`, rollout
+/// JSONL sessions under `~/.codex/sessions`).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Codex;
+
+/// Alias for [`Codex`] matching the unified `*Harness` naming convention.
+pub type CodexHarness = Codex;
+
+impl Harness for Codex {
+    fn id(&self) -> &'static str {
+        "codex"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "OpenAI Codex"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_HOOKS
+            | HarnessCapabilities::SESSION_RESUME
+            | HarnessCapabilities::HEADLESS_SPAWN
+            | HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn agent_flag(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn sandbox_flag(&self) -> Option<&'static str> {
+        Some("--sandbox")
+    }
+
+    fn resume_flag(&self) -> Option<&'static str> {
+        Some("resume")
+    }
+
+    fn workspace_dir(&self) -> Option<String> {
+        Some(".codex".to_owned())
+    }
+
+    fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
+        Some(home.join(".codex/plugins"))
+    }
+
+    fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
+        vec![home.join(".codex/agents")]
+    }
+
+    fn hook_dialect(&self) -> &'static dyn HookDialect {
+        &CLAUDE_CODE_DIALECT
+    }
+
+    fn discover_sessions(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionMeta>, TkgError> {
+        if let Some(home_path) = home_dir() {
+            let sessions_dir = home_path.join(".codex/sessions");
+            let sessions = discover_codex_sessions_in(&sessions_dir, agent_name, workspace_root);
+            if !sessions.is_empty() {
+                return Ok(sessions);
+            }
+        }
+        Ok(discover_generic_state_sessions(agent_name, workspace_root))
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let toml_path = workspace_root.join(".codex/config.toml");
+        let hooks_path = workspace_root.join(".codex/hooks.json");
+        let exists = toml_path.is_file() && hooks_path.is_file();
+        (toml_path, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_codex_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_codex_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn build_spawn_cmd(
+        &self,
+        _workspace_root: &Path,
+        runner: &ProjectRunnerConfig,
+        agent_name: Option<&str>,
+        prompt: Option<&str>,
+        resume_session_id: Option<&str>,
+        sandbox: bool,
+        env_vars: &BTreeMap<String, String>,
+    ) -> Command {
+        if runner.command.is_some() {
+            return build_spawn_cmd_default(
+                runner,
+                agent_name,
+                prompt,
+                resume_session_id,
+                sandbox,
+                env_vars,
+                None,
+            );
+        }
+        let binary = runner.resolved_binary();
+        let mut cmd = Command::new(&binary);
+        for (k, v) in env_vars {
+            cmd.env(k, v);
+        }
+        if prompt.is_some() {
+            cmd.arg("exec");
+        }
+        if sandbox {
+            let flag = runner
+                .resolved_sandbox_flag()
+                .unwrap_or_else(|| "--sandbox".to_owned());
+            cmd.arg(flag).arg("workspace-write");
+        }
+        if let Some(cid) = resume_session_id {
+            let rflag = runner
+                .resolved_resume_flag()
+                .unwrap_or_else(|| "resume".to_owned());
+            cmd.arg(rflag).arg(cid);
+        }
+        if let Some(p) = prompt {
+            cmd.arg(p);
+        }
+        for extra in &runner.extra_args {
+            cmd.arg(extra);
+        }
+        cmd
+    }
+}
+
+/// Google Gemini CLI (`.gemini/settings.json`, `BeforeTool` / `SessionStart`
+/// hooks, `~/.gemini/tmp/*/chats` sessions).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct GeminiCli;
+
+/// Alias for [`GeminiCli`] matching the unified `*Harness` naming convention.
+pub type GeminiHarness = GeminiCli;
+
+impl Harness for GeminiCli {
+    fn id(&self) -> &'static str {
+        "gemini"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Gemini CLI"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_HOOKS
+            | HarnessCapabilities::SESSION_RESUME
+            | HarnessCapabilities::HEADLESS_SPAWN
+            | HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn agent_flag(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn sandbox_flag(&self) -> Option<&'static str> {
+        Some("--sandbox")
+    }
+
+    fn workspace_dir(&self) -> Option<String> {
+        Some(".gemini".to_owned())
+    }
+
+    fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
+        Some(home.join(".gemini/extensions"))
+    }
+
+    fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
+        vec![home.join(".gemini/agents")]
+    }
+
+    fn hook_dialect(&self) -> &'static dyn HookDialect {
+        &GEMINI_CLI_DIALECT
+    }
+
+    fn discover_sessions(
+        &self,
+        agent_name: &str,
+        workspace_root: &Path,
+    ) -> Result<Vec<SessionMeta>, TkgError> {
+        if let Some(home_path) = home_dir() {
+            let tmp_dir = home_path.join(".gemini/tmp");
+            let sessions = discover_gemini_sessions_in(&tmp_dir, agent_name, workspace_root);
+            if !sessions.is_empty() {
+                return Ok(sessions);
+            }
+        }
+        Ok(discover_generic_state_sessions(agent_name, workspace_root))
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = workspace_root.join(".gemini/settings.json");
         let exists = p.is_file();
         (p, exists, false)
     }
@@ -625,7 +1022,382 @@ impl Harness for Cursor {
         workspace_root: &Path,
         _runner: &ProjectRunnerConfig,
     ) -> Result<String, TkgError> {
-        harness_install::register_cursor_config(workspace_root).map_err(TkgError::Workspace)
+        harness_install::register_gemini_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_gemini_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn build_spawn_cmd(
+        &self,
+        _workspace_root: &Path,
+        runner: &ProjectRunnerConfig,
+        agent_name: Option<&str>,
+        prompt: Option<&str>,
+        resume_session_id: Option<&str>,
+        sandbox: bool,
+        env_vars: &BTreeMap<String, String>,
+    ) -> Command {
+        build_spawn_cmd_default(
+            runner,
+            agent_name,
+            prompt,
+            resume_session_id,
+            sandbox,
+            env_vars,
+            Some("-p"),
+        )
+    }
+}
+
+/// GitHub Copilot CLI / Coding Agent (`.vscode/mcp.json` +
+/// `.github/hooks/torqkage.json`).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct GithubCopilot;
+
+/// Alias for [`GithubCopilot`] matching the unified `*Harness` naming convention.
+pub type GithubCopilotHarness = GithubCopilot;
+
+impl Harness for GithubCopilot {
+    fn id(&self) -> &'static str {
+        "github-copilot"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "GitHub Copilot"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_HOOKS
+            | HarnessCapabilities::SESSION_RESUME
+            | HarnessCapabilities::HEADLESS_SPAWN
+            | HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn default_binary(&self) -> String {
+        "copilot".to_owned()
+    }
+
+    fn workspace_dir(&self) -> Option<String> {
+        Some(".github".to_owned())
+    }
+
+    fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
+        Some(home.join(".copilot/plugins"))
+    }
+
+    fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
+        vec![home.join(".copilot/agents")]
+    }
+
+    fn hook_dialect(&self) -> &'static dyn HookDialect {
+        &GITHUB_COPILOT_DIALECT
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let mcp_path = workspace_root.join(".vscode/mcp.json");
+        let hooks_path = workspace_root.join(".github/hooks/torqkage.json");
+        let exists = mcp_path.is_file() && hooks_path.is_file();
+        (mcp_path, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_github_copilot_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_github_copilot_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn build_spawn_cmd(
+        &self,
+        _workspace_root: &Path,
+        runner: &ProjectRunnerConfig,
+        agent_name: Option<&str>,
+        prompt: Option<&str>,
+        resume_session_id: Option<&str>,
+        sandbox: bool,
+        env_vars: &BTreeMap<String, String>,
+    ) -> Command {
+        build_spawn_cmd_default(
+            runner,
+            agent_name,
+            prompt,
+            resume_session_id,
+            sandbox,
+            env_vars,
+            Some("-p"),
+        )
+    }
+}
+
+/// Visual Studio Code Agent Mode (`.vscode/mcp.json` `"servers"` schema).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct VsCode;
+
+/// Alias for [`VsCode`] matching the unified `*Harness` naming convention.
+pub type VsCodeHarness = VsCode;
+
+impl Harness for VsCode {
+    fn id(&self) -> &'static str {
+        "vscode"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "VS Code"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn default_binary(&self) -> String {
+        "code".to_owned()
+    }
+
+    fn workspace_dir(&self) -> Option<String> {
+        Some(".vscode".to_owned())
+    }
+
+    fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
+        Some(home.join(".copilot/plugins"))
+    }
+
+    fn workspace_agent_dirs(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        vec![workspace_root.join(".github/agents")]
+    }
+
+    fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
+        vec![home.join(".copilot/agents")]
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = workspace_root.join(".vscode/mcp.json");
+        let exists = p.is_file();
+        (p, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_vscode_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_vscode_config(workspace_root).map_err(TkgError::Workspace)
+    }
+}
+
+/// Windsurf IDE (`~/.codeium/windsurf/mcp_config.json`; uses in-band MCP
+/// seatbelt).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Windsurf;
+
+/// Alias for [`Windsurf`] matching the unified `*Harness` naming convention.
+pub type WindsurfHarness = Windsurf;
+
+impl Harness for Windsurf {
+    fn id(&self) -> &'static str {
+        "windsurf"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Windsurf"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn workspace_dir(&self) -> Option<String> {
+        Some(".windsurf".to_owned())
+    }
+
+    fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
+        Some(home.join(".codeium/windsurf/plugins"))
+    }
+
+    fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
+        vec![home.join(".windsurf/agents")]
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = harness_install::windsurf_mcp_config_path(workspace_root);
+        let exists = p.is_file();
+        (p, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_windsurf_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn has_global_config(&self) -> bool {
+        true
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_windsurf_config(workspace_root).map_err(TkgError::Workspace)
+    }
+}
+
+/// Roo Code IDE extension (`.roo/mcp.json`; uses in-band MCP seatbelt).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RooCode;
+
+/// Alias for [`RooCode`] matching the unified `*Harness` naming convention.
+pub type RooHarness = RooCode;
+
+impl Harness for RooCode {
+    fn id(&self) -> &'static str {
+        "roo"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Roo Code"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn workspace_dir(&self) -> Option<String> {
+        Some(".roo".to_owned())
+    }
+
+    fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
+        Some(home.join(".roo/plugins"))
+    }
+
+    fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
+        vec![home.join(".roo/rules")]
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = workspace_root.join(".roo/mcp.json");
+        let exists = p.is_file();
+        (p, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_roo_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_roo_config(workspace_root).map_err(TkgError::Workspace)
+    }
+}
+
+/// Cline IDE / CLI (`cline_mcp_settings.json`; uses in-band MCP seatbelt).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Cline;
+
+/// Alias for [`Cline`] matching the unified `*Harness` naming convention.
+pub type ClineHarness = Cline;
+
+impl Harness for Cline {
+    fn id(&self) -> &'static str {
+        "cline"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Cline"
+    }
+
+    fn capabilities(&self) -> HarnessCapabilities {
+        HarnessCapabilities::NATIVE_MCP
+    }
+
+    fn workspace_dir(&self) -> Option<String> {
+        Some(".cline".to_owned())
+    }
+
+    fn plugin_root(&self, home: &Path) -> Option<PathBuf> {
+        Some(home.join(".cline/plugins"))
+    }
+
+    fn home_agent_dirs(&self, home: &Path) -> Vec<PathBuf> {
+        vec![home.join(".cline/rules")]
+    }
+
+    fn config_status(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> (PathBuf, bool, bool) {
+        let p = harness_install::cline_mcp_config_path(workspace_root);
+        let exists = p.is_file();
+        (p, exists, false)
+    }
+
+    fn inject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<String, TkgError> {
+        harness_install::register_cline_config(workspace_root).map_err(TkgError::Workspace)
+    }
+
+    fn has_global_config(&self) -> bool {
+        true
+    }
+
+    fn eject_configs(
+        &self,
+        workspace_root: &Path,
+        _runner: &ProjectRunnerConfig,
+    ) -> Result<Vec<String>, TkgError> {
+        harness_install::eject_cline_config(workspace_root).map_err(TkgError::Workspace)
     }
 }
 
@@ -703,7 +1475,14 @@ pub fn resolve(name: &str) -> Box<dyn Harness> {
         "agy" | "antigravity" => Box::new(Antigravity),
         "opencode" => Box::new(OpenCode),
         "claude" | "claude-code" => Box::new(ClaudeCode),
-        "cursor" => Box::new(Cursor),
+        "cursor" | "cursor-agent" => Box::new(Cursor),
+        "codex" | "openai-codex" | "codex-cli" => Box::new(Codex),
+        "gemini" | "gemini-cli" => Box::new(GeminiCli),
+        "github-copilot" | "copilot-cli" | "gh-copilot" | "copilot" => Box::new(GithubCopilot),
+        "vscode" | "vs-code" | "vscode-copilot" => Box::new(VsCode),
+        "windsurf" | "codeium" => Box::new(Windsurf),
+        "roo" | "roo-code" | "roocode" => Box::new(RooCode),
+        "cline" | "claude-dev" => Box::new(Cline),
         other => Box::new(Generic::new(other)),
     }
 }
@@ -713,16 +1492,28 @@ pub fn resolve(name: &str) -> Box<dyn Harness> {
 #[must_use]
 pub fn resolve_client_name(raw_name: &str) -> Box<dyn Harness> {
     let lower = raw_name.trim().to_ascii_lowercase();
-    if lower.contains("claude") {
+    if lower.contains("claude") && !lower.contains("claude-dev") {
         Box::new(ClaudeCode)
     } else if lower.contains("antigravity") || lower == "agy" || lower.starts_with("agy-") {
         Box::new(Antigravity)
+    } else if lower.contains("gemini") {
+        Box::new(GeminiCli)
+    } else if lower.contains("codex") {
+        Box::new(Codex)
     } else if lower.contains("opencode") {
         Box::new(OpenCode)
     } else if lower.contains("cursor") {
         Box::new(Cursor)
-    } else if lower.contains("windsurf") {
-        Box::new(Generic::new("windsurf"))
+    } else if lower.contains("copilot") {
+        Box::new(GithubCopilot)
+    } else if lower.contains("visual studio code") || lower.contains("vscode") {
+        Box::new(VsCode)
+    } else if lower.contains("windsurf") || lower.contains("codeium") {
+        Box::new(Windsurf)
+    } else if lower.contains("roo") {
+        Box::new(RooCode)
+    } else if lower.contains("cline") || lower.contains("claude-dev") {
+        Box::new(Cline)
     } else {
         resolve(raw_name)
     }
@@ -738,8 +1529,11 @@ pub fn detect_parent_process_harness() -> Option<String> {
     let cmdline = String::from_utf8_lossy(&bytes).to_ascii_lowercase();
     for needle in [
         "claude",
+        "codex",
+        "gemini",
         "cursor",
         "opencode",
+        "copilot",
         "windsurf",
         "antigravity",
         "agy",
@@ -767,6 +1561,13 @@ pub fn builtin_harnesses() -> Vec<Box<dyn Harness>> {
         Box::new(OpenCode),
         Box::new(ClaudeCode),
         Box::new(Cursor),
+        Box::new(Codex),
+        Box::new(GeminiCli),
+        Box::new(GithubCopilot),
+        Box::new(VsCode),
+        Box::new(Windsurf),
+        Box::new(RooCode),
+        Box::new(Cline),
     ]
 }
 
@@ -851,8 +1652,10 @@ pub fn find_hooks_toml(workspace_root: &Path) -> Option<PathBuf> {
     find_config_file(workspace_root, "hooks.toml")
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+pub(crate) fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
 }
 
 #[cfg(test)]
@@ -871,7 +1674,17 @@ mod tests {
         assert_eq!(resolve("Antigravity").id(), "agy");
         assert_eq!(resolve("claude-code").id(), "claude");
         assert_eq!(resolve("cursor").id(), "cursor");
-        assert_eq!(resolve("cursor").default_binary(), "cursor");
+        assert_eq!(resolve("cursor").default_binary(), "agent");
+        assert_eq!(resolve("codex").id(), "codex");
+        assert_eq!(resolve("codex").default_binary(), "codex");
+        assert_eq!(resolve("gemini-cli").id(), "gemini");
+        assert_eq!(resolve("gemini").default_binary(), "gemini");
+        assert_eq!(resolve("github-copilot").id(), "github-copilot");
+        assert_eq!(resolve("copilot-cli").default_binary(), "copilot");
+        assert_eq!(resolve("vscode").id(), "vscode");
+        assert_eq!(resolve("windsurf").id(), "windsurf");
+        assert_eq!(resolve("roo-code").id(), "roo");
+        assert_eq!(resolve("cline").id(), "cline");
         assert_eq!(resolve("agy").sandbox_flag(), Some("--sandbox"));
         assert_eq!(resolve("opencode").resume_flag(), Some("--session"));
         assert_eq!(resolve("whatever").resume_flag(), Some("--resume"));
@@ -890,6 +1703,14 @@ mod tests {
         assert_eq!(
             runner("cursor").harness().workspace_dir().as_deref(),
             Some(".cursor")
+        );
+        assert_eq!(
+            runner("codex").harness().workspace_dir().as_deref(),
+            Some(".codex")
+        );
+        assert_eq!(
+            runner("roo").harness().workspace_dir().as_deref(),
+            Some(".roo")
         );
         assert_eq!(runner("custom").harness().workspace_dir(), None);
     }
@@ -921,9 +1742,52 @@ mod tests {
         std::fs::create_dir_all(claude_ws.join(".claude")).ok();
         assert_eq!(detect_workspace_harness(&claude_ws), Some("claude"));
 
+        let codex_ws = base.join("codex_ws");
+        std::fs::create_dir_all(codex_ws.join(".codex")).ok();
+        assert_eq!(detect_workspace_harness(&codex_ws), Some("codex"));
+
         let opencode_ws = base.join("opencode_ws");
         std::fs::create_dir_all(opencode_ws.join(".opencode")).ok();
         assert_eq!(detect_workspace_harness(&opencode_ws), Some("opencode"));
+
+        let gemini_ws = base.join("gemini_ws");
+        std::fs::create_dir_all(gemini_ws.join(".gemini")).ok();
+        std::fs::write(gemini_ws.join(".gemini/settings.json"), "{}").ok();
+        assert_eq!(detect_workspace_harness(&gemini_ws), Some("gemini"));
+
+        let agy_ws = base.join("agy_ws");
+        std::fs::create_dir_all(agy_ws.join(".gemini/agents")).ok();
+        assert_eq!(detect_workspace_harness(&agy_ws), Some("agy"));
+
+        let cursor_ws = base.join("cursor_ws");
+        std::fs::create_dir_all(cursor_ws.join(".cursor")).ok();
+        std::fs::write(cursor_ws.join(".cursor/hooks.json"), "{}").ok();
+        assert_eq!(detect_workspace_harness(&cursor_ws), Some("cursor"));
+
+        let vscode_ws = base.join("vscode_ws");
+        std::fs::create_dir_all(vscode_ws.join(".vscode")).ok();
+        std::fs::write(vscode_ws.join(".vscode/mcp.json"), "{}").ok();
+        assert_eq!(detect_workspace_harness(&vscode_ws), Some("vscode"));
+
+        let gh_copilot_ws = base.join("gh_copilot_ws");
+        std::fs::create_dir_all(gh_copilot_ws.join(".github/hooks")).ok();
+        assert_eq!(
+            detect_workspace_harness(&gh_copilot_ws),
+            Some("github-copilot")
+        );
+
+        let roo_ws = base.join("roo_ws");
+        std::fs::create_dir_all(roo_ws.join(".roo")).ok();
+        assert_eq!(detect_workspace_harness(&roo_ws), Some("roo"));
+
+        let cline_ws = base.join("cline_ws");
+        std::fs::create_dir_all(&cline_ws).ok();
+        std::fs::write(cline_ws.join(".clinerules"), "").ok();
+        assert_eq!(detect_workspace_harness(&cline_ws), Some("cline"));
+
+        let windsurf_ws = base.join("windsurf_ws");
+        std::fs::create_dir_all(windsurf_ws.join(".windsurf")).ok();
+        assert_eq!(detect_workspace_harness(&windsurf_ws), Some("windsurf"));
 
         let empty_ws = base.join("empty_ws");
         std::fs::create_dir_all(&empty_ws).ok();
@@ -936,7 +1800,7 @@ mod tests {
     fn test_resolve_client_name_and_hook_support() {
         let cursor = resolve_client_name("Cursor");
         assert_eq!(cursor.id(), "cursor");
-        assert!(!cursor.supports_hooks());
+        assert!(cursor.supports_hooks());
 
         let claude = resolve_client_name("Claude Code");
         assert_eq!(claude.id(), "claude");
@@ -945,6 +1809,34 @@ mod tests {
         let agy = resolve_client_name("antigravity-cli");
         assert_eq!(agy.id(), "agy");
         assert!(agy.supports_hooks());
+
+        let codex = resolve_client_name("codex-mcp-client");
+        assert_eq!(codex.id(), "codex");
+        assert!(codex.supports_hooks());
+
+        let gemini = resolve_client_name("gemini-cli");
+        assert_eq!(gemini.id(), "gemini");
+        assert!(gemini.supports_hooks());
+
+        let copilot = resolve_client_name("GitHub Copilot CLI");
+        assert_eq!(copilot.id(), "github-copilot");
+        assert!(copilot.supports_hooks());
+
+        let vscode = resolve_client_name("Visual Studio Code");
+        assert_eq!(vscode.id(), "vscode");
+        assert!(!vscode.supports_hooks());
+
+        let windsurf = resolve_client_name("Windsurf Cascade");
+        assert_eq!(windsurf.id(), "windsurf");
+        assert!(!windsurf.supports_hooks());
+
+        let roo = resolve_client_name("Roo Code");
+        assert_eq!(roo.id(), "roo");
+        assert!(!roo.supports_hooks());
+
+        let cline = resolve_client_name("Cline");
+        assert_eq!(cline.id(), "cline");
+        assert!(!cline.supports_hooks());
 
         let unknown = resolve_client_name("zed-editor");
         assert_eq!(unknown.id(), "zed-editor");
@@ -963,8 +1855,32 @@ mod tests {
                 .capabilities()
                 .contains(HarnessCapabilities::NATIVE_HOOKS | HarnessCapabilities::HEADLESS_SPAWN)
         );
+        assert!(
+            CursorHarness::default()
+                .capabilities()
+                .contains(HarnessCapabilities::NATIVE_HOOKS | HarnessCapabilities::SESSION_RESUME)
+        );
+        assert!(
+            CodexHarness::default()
+                .capabilities()
+                .contains(HarnessCapabilities::NATIVE_HOOKS | HarnessCapabilities::SESSION_RESUME)
+        );
+        assert!(
+            GeminiHarness::default()
+                .capabilities()
+                .contains(HarnessCapabilities::NATIVE_HOOKS | HarnessCapabilities::SESSION_RESUME)
+        );
+        assert!(
+            GithubCopilotHarness::default()
+                .capabilities()
+                .contains(HarnessCapabilities::NATIVE_HOOKS | HarnessCapabilities::NATIVE_MCP)
+        );
         assert_eq!(
-            CursorHarness::default().capabilities(),
+            VsCodeHarness::default().capabilities(),
+            HarnessCapabilities::NATIVE_MCP
+        );
+        assert_eq!(
+            WindsurfHarness::default().capabilities(),
             HarnessCapabilities::NATIVE_MCP
         );
         assert!(
@@ -988,5 +1904,47 @@ mod tests {
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
         assert_eq!(args, vec!["--session", "ses-99", "fix bugs"]);
+
+        let codex_r = runner("codex");
+        let codex_cmd = codex_r.harness().build_spawn_cmd(
+            Path::new("/ws"),
+            &codex_r,
+            None,
+            Some("fix tests"),
+            Some("codex-99"),
+            true,
+            &BTreeMap::new(),
+        );
+        let codex_args: Vec<_> = codex_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            codex_args,
+            vec![
+                "exec",
+                "--sandbox",
+                "workspace-write",
+                "resume",
+                "codex-99",
+                "fix tests"
+            ]
+        );
+
+        let gem_r = runner("gemini");
+        let gem_cmd = gem_r.harness().build_spawn_cmd(
+            Path::new("/ws"),
+            &gem_r,
+            None,
+            Some("review diff"),
+            Some("gem-7"),
+            false,
+            &BTreeMap::new(),
+        );
+        let gem_args: Vec<_> = gem_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(gem_args, vec!["--resume", "gem-7", "-p", "review diff"]);
     }
 }

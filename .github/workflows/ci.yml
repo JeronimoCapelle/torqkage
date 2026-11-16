@@ -10,7 +10,8 @@ on:
       - "ARCHITECTURE.md"
       - "assets/**"
       - ".github/ISSUE_TEMPLATE/**"
-      - "LICENSE"
+      - "LICENSE-APACHE"
+      - "LICENSE-MIT"
   pull_request:
     branches: [ "main", "master" ]
     paths-ignore:
@@ -19,7 +20,8 @@ on:
       - "ARCHITECTURE.md"
       - "assets/**"
       - ".github/ISSUE_TEMPLATE/**"
-      - "LICENSE"
+      - "LICENSE-APACHE"
+      - "LICENSE-MIT"
 
 env:
   CARGO_TERM_COLOR: always
@@ -61,10 +63,10 @@ jobs:
       - name: Install Rust toolchain (Stable)
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-deny, cargo-machete, and typos
+      - name: Install cargo-deny, cargo-machete, typos, and taplo
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny,cargo-machete,typos-cli
+          tool: cargo-deny,cargo-machete,typos-cli,taplo-cli
 
       - name: Security, License & Banned Dependency Audit (cargo-deny)
         env:
@@ -77,6 +79,9 @@ jobs:
 
       - name: Source Spellcheck (typos)
         run: typos
+
+      - name: Verify TOML formatting (taplo)
+        run: taplo fmt --check
 
   quality-gate:
     name: Build, Test & Lint
@@ -101,10 +106,10 @@ jobs:
         with:
           shared-key: "torqkage-cache"
 
-      - name: Install cargo-nextest
+      - name: Install cargo-nextest, cargo-hack, and cargo-llvm-cov
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest
+          tool: cargo-nextest,cargo-hack,cargo-llvm-cov
 
       - name: Verify code formatting (rustfmt)
         run: cargo fmt --check
@@ -112,16 +117,22 @@ jobs:
       - name: Verify compilation across all workspace crates, benches, and examples
         run: cargo check --workspace --all-targets --benches --examples
 
-      - name: Enforce strict pedantic linter clean rules (clippy)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Verify fuzz targets compile cleanly
+        run: cargo check --manifest-path fuzz/Cargo.toml
+
+      - name: Enforce strict pedantic linter clean rules across feature powerset (cargo-hack + clippy)
+        run: cargo hack clippy --workspace --all-targets --feature-powerset -- -D warnings
 
       - name: Verify Rustdoc generation with zero warnings
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --workspace --no-deps --all-features
 
-      - name: Execute automated unit, property, and snapshot tests (nextest)
-        run: cargo nextest run --workspace --profile ci
+      - name: Execute automated unit, property, and snapshot tests (default features)
+        run: cargo nextest run --workspace --profile ci --locked
+
+      - name: Execute workspace tests with source-based code coverage (all features)
+        run: cargo llvm-cov nextest --workspace --profile ci --all-features --locked --summary-only
 
       - name: Execute documentation tests
-        run: cargo test --workspace --doc
+        run: cargo test --workspace --doc --locked

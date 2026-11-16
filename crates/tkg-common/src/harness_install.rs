@@ -203,21 +203,47 @@ fn write_pretty_json_atomic(config_path: &Path, value: &serde_json::Value) -> Re
         .map_err(|e| format!("Failed to write {}: {e}", config_path.display()))
 }
 
-fn upsert_torqkage_mcp_server(config: &mut serde_json::Value) {
+fn upsert_mcp_server_entry(
+    config: &mut serde_json::Value,
+    servers_key: &str,
+    entry: serde_json::Value,
+) {
     if let Some(obj) = config.as_object_mut() {
         let servers = obj
-            .entry("mcpServers")
+            .entry(servers_key)
             .or_insert_with(|| serde_json::json!({}));
         if let Some(s_obj) = servers.as_object_mut() {
-            s_obj.insert(
-                "torqkage".to_owned(),
-                serde_json::json!({
-                    "command": "tkg-mcp",
-                    "args": []
-                }),
-            );
+            s_obj.insert("torqkage".to_owned(), entry);
         }
     }
+}
+
+fn upsert_torqkage_mcp_server(config: &mut serde_json::Value) {
+    upsert_mcp_server_entry(
+        config,
+        "mcpServers",
+        serde_json::json!({
+            "command": "tkg-mcp",
+            "args": []
+        }),
+    );
+}
+
+fn register_mcp_json_file(
+    config_path: &Path,
+    servers_key: &str,
+    entry: serde_json::Value,
+    default_json: serde_json::Value,
+) -> Result<(), String> {
+    if let Some(parent) = config_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+    }
+    let mut config = read_or_init_json_object(config_path, default_json)?;
+    upsert_mcp_server_entry(&mut config, servers_key, entry);
+    write_pretty_json_atomic(config_path, &config)
 }
 
 /// Registers `tkg-mcp` in `opencode.json` for `OpenCode` integration.
@@ -227,12 +253,12 @@ fn upsert_torqkage_mcp_server(config: &mut serde_json::Value) {
 /// object or written atomically.
 pub fn register_opencode_config(workspace_root: &Path) -> Result<String, String> {
     let config_path = workspace_root.join("opencode.json");
-    let mut config = read_or_init_json_object(
+    register_mcp_json_file(
         &config_path,
+        "mcpServers",
+        serde_json::json!({ "command": "tkg-mcp", "args": [] }),
         serde_json::json!({ "$schema": "https://opencode.ai/schema.json" }),
     )?;
-    upsert_torqkage_mcp_server(&mut config);
-    write_pretty_json_atomic(&config_path, &config)?;
 
     Ok(format!(
         "✔ Registered 'tkg-mcp' in opencode.json at {}",
@@ -240,12 +266,14 @@ pub fn register_opencode_config(workspace_root: &Path) -> Result<String, String>
     ))
 }
 
-fn upsert_claude_hook_event(
+fn upsert_command_hook_event(
     hooks_obj: &mut serde_json::Map<String, serde_json::Value>,
     event: &str,
     matcher: Option<&str>,
     subcommand: &str,
-    timeout_secs: u64,
+    timeout: Option<u64>,
+    hook_name: Option<&str>,
+    nested_hooks: bool,
 ) {
     let entry_list = hooks_obj
         .entry(event)
@@ -254,30 +282,53 @@ fn upsert_claude_hook_event(
         return;
     };
 
+    let needle = format!("tkg-hooks {subcommand}");
     arr.retain(|item| {
-        let has_tkg_cmd = item
+        let flat_match = item
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|cmd| cmd.contains(&needle));
+        let nested_match = item
             .get("hooks")
             .and_then(serde_json::Value::as_array)
             .is_some_and(|hs| {
                 hs.iter().any(|h| {
                     h.get("command")
                         .and_then(serde_json::Value::as_str)
-                        .is_some_and(|cmd| cmd.contains(&format!("tkg-hooks {subcommand}")))
+                        .is_some_and(|cmd| cmd.contains(&needle))
                 })
             });
-        !has_tkg_cmd
+        !flat_match && !nested_match
     });
 
-    let cmd_entry = serde_json::json!({
-        "type": "command",
-        "command": format!("tkg-hooks {subcommand}"),
-        "timeout": timeout_secs
-    });
-    let wrapper = matcher.map_or_else(
-        || serde_json::json!({ "hooks": [cmd_entry] }),
-        |m| serde_json::json!({ "matcher": m, "hooks": [cmd_entry] }),
-    );
-    arr.push(wrapper);
+    let mut cmd_map = serde_json::Map::new();
+    if let Some(name) = hook_name {
+        cmd_map.insert("name".to_owned(), serde_json::json!(name));
+    }
+    if nested_hooks {
+        cmd_map.insert("type".to_owned(), serde_json::json!("command"));
+    }
+    cmd_map.insert("command".to_owned(), serde_json::json!(needle));
+    if let Some(t) = timeout {
+        cmd_map.insert("timeout".to_owned(), serde_json::json!(t));
+    }
+
+    if nested_hooks {
+        let mut wrapper = serde_json::Map::new();
+        if let Some(m) = matcher {
+            wrapper.insert("matcher".to_owned(), serde_json::json!(m));
+        }
+        wrapper.insert(
+            "hooks".to_owned(),
+            serde_json::json!([serde_json::Value::Object(cmd_map)]),
+        );
+        arr.push(serde_json::Value::Object(wrapper));
+    } else {
+        if let Some(m) = matcher {
+            cmd_map.insert("matcher".to_owned(), serde_json::json!(m));
+        }
+        arr.push(serde_json::Value::Object(cmd_map));
+    }
 }
 
 /// Registers `tkg-mcp` in `.mcp.json` and `tkg-hooks` in
@@ -287,9 +338,12 @@ fn upsert_claude_hook_event(
 /// Returns an error if any existing JSON file is invalid or writing fails.
 pub fn register_claude_config(workspace_root: &Path) -> Result<String, String> {
     let mcp_path = workspace_root.join(".mcp.json");
-    let mut mcp_config = read_or_init_json_object(&mcp_path, serde_json::json!({}))?;
-    upsert_torqkage_mcp_server(&mut mcp_config);
-    write_pretty_json_atomic(&mcp_path, &mcp_config)?;
+    register_mcp_json_file(
+        &mcp_path,
+        "mcpServers",
+        serde_json::json!({ "command": "tkg-mcp", "args": [] }),
+        serde_json::json!({}),
+    )?;
 
     let claude_dir = workspace_root.join(".claude");
     std::fs::create_dir_all(&claude_dir)
@@ -301,9 +355,33 @@ pub fn register_claude_config(workspace_root: &Path) -> Result<String, String> {
             .entry("hooks")
             .or_insert_with(|| serde_json::json!({}));
         if let Some(hooks_obj) = hooks.as_object_mut() {
-            upsert_claude_hook_event(hooks_obj, "PreToolUse", Some("*"), "pre-tool-use", 15);
-            upsert_claude_hook_event(hooks_obj, "SessionStart", None, "inject-wake", 5);
-            upsert_claude_hook_event(hooks_obj, "Stop", None, "record-handoff", 10);
+            upsert_command_hook_event(
+                hooks_obj,
+                "PreToolUse",
+                Some("*"),
+                "pre-tool-use",
+                Some(15),
+                None,
+                true,
+            );
+            upsert_command_hook_event(
+                hooks_obj,
+                "SessionStart",
+                None,
+                "inject-wake",
+                Some(5),
+                None,
+                true,
+            );
+            upsert_command_hook_event(
+                hooks_obj,
+                "Stop",
+                None,
+                "record-handoff",
+                Some(10),
+                None,
+                true,
+            );
         }
     }
     write_pretty_json_atomic(&settings_path, &settings)?;
@@ -315,24 +393,395 @@ pub fn register_claude_config(workspace_root: &Path) -> Result<String, String> {
     ))
 }
 
-/// Registers `tkg-mcp` in `.cursor/mcp.json` for Cursor IDE while preserving
-/// existing servers.
+/// Registers `tkg-mcp` in `.cursor/mcp.json` and native Cursor agent hooks in
+/// `.cursor/hooks.json` while preserving existing entries.
 ///
 /// # Errors
-/// Returns an error if `.cursor/mcp.json` is corrupt or cannot be written.
+/// Returns an error if `.cursor/mcp.json` or `.cursor/hooks.json` is corrupt
+/// or cannot be written.
 pub fn register_cursor_config(workspace_root: &Path) -> Result<String, String> {
     let cursor_dir = workspace_root.join(".cursor");
     std::fs::create_dir_all(&cursor_dir)
         .map_err(|e| format!("Failed to create {}: {e}", cursor_dir.display()))?;
-    let config_path = cursor_dir.join("mcp.json");
-    let mut config = read_or_init_json_object(&config_path, serde_json::json!({}))?;
-    upsert_torqkage_mcp_server(&mut config);
-    write_pretty_json_atomic(&config_path, &config)?;
+    let mcp_path = cursor_dir.join("mcp.json");
+    register_mcp_json_file(
+        &mcp_path,
+        "mcpServers",
+        serde_json::json!({ "command": "tkg-mcp", "args": [] }),
+        serde_json::json!({}),
+    )?;
+
+    let hooks_path = cursor_dir.join("hooks.json");
+    let mut hooks_cfg = read_or_init_json_object(&hooks_path, serde_json::json!({ "version": 1 }))?;
+    if let Some(root_obj) = hooks_cfg.as_object_mut() {
+        root_obj
+            .entry("version")
+            .or_insert_with(|| serde_json::json!(1));
+        let hooks = root_obj
+            .entry("hooks")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(hooks_obj) = hooks.as_object_mut() {
+            upsert_command_hook_event(
+                hooks_obj,
+                "preToolUse",
+                Some(".*"),
+                "pre-tool-use",
+                Some(15),
+                None,
+                false,
+            );
+            upsert_command_hook_event(
+                hooks_obj,
+                "beforeShellExecution",
+                None,
+                "pre-tool-use",
+                Some(15),
+                None,
+                false,
+            );
+            upsert_command_hook_event(
+                hooks_obj,
+                "beforeMCPExecution",
+                None,
+                "pre-tool-use",
+                Some(15),
+                None,
+                false,
+            );
+            upsert_command_hook_event(
+                hooks_obj,
+                "sessionStart",
+                None,
+                "inject-wake",
+                Some(5),
+                None,
+                false,
+            );
+            upsert_command_hook_event(
+                hooks_obj,
+                "stop",
+                None,
+                "record-handoff",
+                Some(10),
+                None,
+                false,
+            );
+        }
+    }
+    write_pretty_json_atomic(&hooks_path, &hooks_cfg)?;
+
+    Ok(format!(
+        "✔ Registered 'tkg-mcp' in {} and hooks in {}",
+        mcp_path.display(),
+        hooks_path.display()
+    ))
+}
+
+/// Registers `tkg-mcp` in `.codex/config.toml` (`[mcp_servers.torqkage]`) and
+/// lifecycle hooks in `.codex/hooks.json` for `OpenAI` Codex CLI.
+///
+/// # Errors
+/// Returns an error if existing config files are invalid TOML/JSON or writing
+/// fails.
+pub fn register_codex_config(workspace_root: &Path) -> Result<String, String> {
+    let codex_dir = workspace_root.join(".codex");
+    std::fs::create_dir_all(&codex_dir)
+        .map_err(|e| format!("Failed to create {}: {e}", codex_dir.display()))?;
+
+    let toml_path = codex_dir.join("config.toml");
+    let mut table: toml::Table = if toml_path.is_file() {
+        let raw = std::fs::read_to_string(&toml_path)
+            .map_err(|e| format!("Failed to read {}: {e}", toml_path.display()))?;
+        if raw.trim().is_empty() {
+            toml::Table::new()
+        } else {
+            toml::from_str(&raw)
+                .map_err(|e| format!("Failed to parse TOML in {}: {e}", toml_path.display()))?
+        }
+    } else {
+        toml::Table::new()
+    };
+
+    let mcp_entry = table
+        .entry("mcp_servers")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let mcp_table = mcp_entry.as_table_mut().ok_or_else(|| {
+        format!(
+            "Expected [mcp_servers] to be a TOML table in {}",
+            toml_path.display()
+        )
+    })?;
+    let mut server_tbl = toml::Table::new();
+    server_tbl.insert(
+        "command".to_owned(),
+        toml::Value::String("tkg-mcp".to_owned()),
+    );
+    server_tbl.insert("args".to_owned(), toml::Value::Array(Vec::new()));
+    mcp_table.insert("torqkage".to_owned(), toml::Value::Table(server_tbl));
+
+    let serialized_toml = toml::to_string_pretty(&table)
+        .map_err(|e| format!("Failed to serialize {}: {e}", toml_path.display()))?;
+    atomic_write(&toml_path, serialized_toml.as_bytes())
+        .map_err(|e| format!("Failed to write {}: {e}", toml_path.display()))?;
+
+    let hooks_path = codex_dir.join("hooks.json");
+    let mut hooks_root = read_or_init_json_object(&hooks_path, serde_json::json!({}))?;
+    if let Some(hooks_obj) = hooks_root.as_object_mut() {
+        upsert_command_hook_event(
+            hooks_obj,
+            "PreToolUse",
+            Some(".*"),
+            "pre-tool-use",
+            Some(15),
+            None,
+            true,
+        );
+        upsert_command_hook_event(
+            hooks_obj,
+            "SessionStart",
+            None,
+            "inject-wake",
+            Some(5),
+            None,
+            true,
+        );
+    }
+    write_pretty_json_atomic(&hooks_path, &hooks_root)?;
+
+    Ok(format!(
+        "✔ Registered 'tkg-mcp' in {} and hooks in {}",
+        toml_path.display(),
+        hooks_path.display()
+    ))
+}
+
+/// Registers `tkg-mcp` and lifecycle hooks (`BeforeTool`, `SessionStart`) in
+/// `.gemini/settings.json` for Google Gemini CLI.
+///
+/// # Errors
+/// Returns an error if `.gemini/settings.json` is corrupt or cannot be written.
+pub fn register_gemini_config(workspace_root: &Path) -> Result<String, String> {
+    let settings_path = workspace_root.join(".gemini/settings.json");
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+    }
+    let mut settings = read_or_init_json_object(&settings_path, serde_json::json!({}))?;
+    upsert_torqkage_mcp_server(&mut settings);
+    if let Some(root_obj) = settings.as_object_mut() {
+        let hooks = root_obj
+            .entry("hooks")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(hooks_obj) = hooks.as_object_mut() {
+            upsert_command_hook_event(
+                hooks_obj,
+                "BeforeTool",
+                Some(".*"),
+                "pre-tool-use",
+                Some(15_000),
+                Some("torqkage-pre-tool-use"),
+                true,
+            );
+            upsert_command_hook_event(
+                hooks_obj,
+                "SessionStart",
+                Some("*"),
+                "inject-wake",
+                Some(5_000),
+                Some("torqkage-session-start"),
+                true,
+            );
+        }
+    }
+    write_pretty_json_atomic(&settings_path, &settings)?;
+
+    Ok(format!(
+        "✔ Registered 'tkg-mcp' and hooks in {}",
+        settings_path.display()
+    ))
+}
+
+/// Registers `tkg-mcp` in `.vscode/mcp.json` using VS Code Agent Mode's
+/// `"servers"` schema (`type = "stdio"`).
+///
+/// # Errors
+/// Returns an error if `.vscode/mcp.json` is corrupt or cannot be written.
+pub fn register_vscode_config(workspace_root: &Path) -> Result<String, String> {
+    let mcp_path = workspace_root.join(".vscode/mcp.json");
+    register_mcp_json_file(
+        &mcp_path,
+        "servers",
+        serde_json::json!({
+            "type": "stdio",
+            "command": "tkg-mcp",
+            "args": []
+        }),
+        serde_json::json!({}),
+    )?;
+
+    Ok(format!("✔ Registered 'tkg-mcp' in {}", mcp_path.display()))
+}
+
+/// Registers `tkg-mcp` in `.vscode/mcp.json` and lifecycle hooks in
+/// `.github/hooks/torqkage.json` for GitHub Copilot CLI / Coding Agent.
+///
+/// # Errors
+/// Returns an error if existing JSON files are corrupt or cannot be written.
+pub fn register_github_copilot_config(workspace_root: &Path) -> Result<String, String> {
+    drop(register_vscode_config(workspace_root)?);
+    let hooks_dir = workspace_root.join(".github/hooks");
+    std::fs::create_dir_all(&hooks_dir)
+        .map_err(|e| format!("Failed to create {}: {e}", hooks_dir.display()))?;
+    let hooks_path = hooks_dir.join("torqkage.json");
+    let mut hooks_cfg = read_or_init_json_object(&hooks_path, serde_json::json!({ "version": 1 }))?;
+    if let Some(root_obj) = hooks_cfg.as_object_mut() {
+        root_obj
+            .entry("version")
+            .or_insert_with(|| serde_json::json!(1));
+        let hooks = root_obj
+            .entry("hooks")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(hooks_obj) = hooks.as_object_mut() {
+            upsert_command_hook_event(
+                hooks_obj,
+                "preToolUse",
+                None,
+                "pre-tool-use",
+                Some(15),
+                None,
+                false,
+            );
+            upsert_command_hook_event(
+                hooks_obj,
+                "sessionStart",
+                None,
+                "inject-wake",
+                Some(5),
+                None,
+                false,
+            );
+        }
+    }
+    write_pretty_json_atomic(&hooks_path, &hooks_cfg)?;
+
+    Ok(format!(
+        "✔ Registered 'tkg-mcp' in {} and hooks in {}",
+        workspace_root.join(".vscode/mcp.json").display(),
+        hooks_path.display()
+    ))
+}
+
+/// Registers `tkg-mcp` in `.roo/mcp.json` for Roo Code.
+///
+/// # Errors
+/// Returns an error if `.roo/mcp.json` is corrupt or cannot be written.
+pub fn register_roo_config(workspace_root: &Path) -> Result<String, String> {
+    let config_path = workspace_root.join(".roo/mcp.json");
+    register_mcp_json_file(
+        &config_path,
+        "mcpServers",
+        serde_json::json!({ "command": "tkg-mcp", "args": [] }),
+        serde_json::json!({}),
+    )?;
 
     Ok(format!(
         "✔ Registered 'tkg-mcp' in {}",
         config_path.display()
     ))
+}
+
+/// Resolves the target Windsurf MCP config path (`~/.codeium/windsurf/mcp_config.json`
+/// when `HOME` is set, otherwise `<ws>/.windsurf/mcp_config.json`).
+#[must_use]
+pub fn windsurf_mcp_config_path(workspace_root: &Path) -> PathBuf {
+    crate::harness::home_dir().map_or_else(
+        || workspace_root.join(".windsurf/mcp_config.json"),
+        |h| h.join(".codeium/windsurf/mcp_config.json"),
+    )
+}
+
+/// Registers `tkg-mcp` at an explicit Windsurf MCP config file path.
+///
+/// # Errors
+/// Returns an error if the config file is corrupt or cannot be written.
+pub fn register_windsurf_config_at(config_path: &Path) -> Result<String, String> {
+    register_mcp_json_file(
+        config_path,
+        "mcpServers",
+        serde_json::json!({ "command": "tkg-mcp", "args": [] }),
+        serde_json::json!({}),
+    )?;
+    Ok(format!(
+        "✔ Registered 'tkg-mcp' for Windsurf at {}",
+        config_path.display()
+    ))
+}
+
+/// Registers `tkg-mcp` for Windsurf (`~/.codeium/windsurf/mcp_config.json`).
+///
+/// # Errors
+/// Returns an error if the config file is corrupt or cannot be written.
+pub fn register_windsurf_config(workspace_root: &Path) -> Result<String, String> {
+    register_windsurf_config_at(&windsurf_mcp_config_path(workspace_root))
+}
+
+/// Resolves the active Cline MCP settings path across VS Code globalStorage
+/// directories and Cline CLI (`~/.cline/data/settings/cline_mcp_settings.json`).
+#[must_use]
+pub fn cline_mcp_config_path(workspace_root: &Path) -> PathBuf {
+    let mut candidates = Vec::new();
+    #[cfg(target_os = "windows")]
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        candidates.push(PathBuf::from(appdata).join(
+            "Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+        ));
+    }
+    if let Some(home) = crate::harness::home_dir() {
+        #[cfg(target_os = "macos")]
+        candidates.push(
+            home.join("Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"),
+        );
+        #[cfg(all(unix, not(target_os = "macos")))]
+        candidates.push(
+            home.join(".config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"),
+        );
+        candidates.push(home.join(".cline/data/settings/cline_mcp_settings.json"));
+    }
+
+    for c in &candidates {
+        if c.is_file() || c.parent().is_some_and(Path::is_dir) {
+            return c.clone();
+        }
+    }
+    candidates
+        .into_iter()
+        .last()
+        .unwrap_or_else(|| workspace_root.join(".cline/cline_mcp_settings.json"))
+}
+
+/// Registers `tkg-mcp` at an explicit Cline MCP settings path.
+///
+/// # Errors
+/// Returns an error if the config file is corrupt or cannot be written.
+pub fn register_cline_config_at(config_path: &Path) -> Result<String, String> {
+    register_mcp_json_file(
+        config_path,
+        "mcpServers",
+        serde_json::json!({ "command": "tkg-mcp", "args": [] }),
+        serde_json::json!({}),
+    )?;
+    Ok(format!(
+        "✔ Registered 'tkg-mcp' for Cline at {}",
+        config_path.display()
+    ))
+}
+
+/// Registers `tkg-mcp` for Cline IDE / CLI.
+///
+/// # Errors
+/// Returns an error if the config file is corrupt or cannot be written.
+pub fn register_cline_config(workspace_root: &Path) -> Result<String, String> {
+    register_cline_config_at(&cline_mcp_config_path(workspace_root))
 }
 
 /// Generates a standalone MCP server configuration in
@@ -342,18 +791,490 @@ pub fn register_cursor_config(workspace_root: &Path) -> Result<String, String> {
 /// Returns an error if the state directory cannot be created or the config file
 /// cannot be written.
 pub fn register_custom_mcp_config(workspace_root: &Path) -> Result<String, String> {
-    let state_dir = workspace_root.join(".tkg/state");
-    std::fs::create_dir_all(&state_dir)
-        .map_err(|e| format!("Failed to create {}: {e}", state_dir.display()))?;
-    let config_path = state_dir.join("mcp_servers.json");
-    let mut config = read_or_init_json_object(&config_path, serde_json::json!({}))?;
-    upsert_torqkage_mcp_server(&mut config);
-    write_pretty_json_atomic(&config_path, &config)?;
+    let config_path = workspace_root.join(".tkg/state/mcp_servers.json");
+    register_mcp_json_file(
+        &config_path,
+        "mcpServers",
+        serde_json::json!({ "command": "tkg-mcp", "args": [] }),
+        serde_json::json!({}),
+    )?;
 
     Ok(format!(
         "✔ Generated MCP server config at {}",
         config_path.display()
     ))
+}
+
+/// Removes empty directories starting at `start_dir` up to (not including)
+/// `stop_at`. Ignores non-empty or missing directories.
+pub fn prune_empty_ancestors(start_dir: &Path, stop_at: &Path) {
+    let mut current = start_dir;
+    while current != stop_at {
+        if !current.starts_with(stop_at) {
+            break;
+        }
+        if std::fs::remove_dir(current).is_err() {
+            break;
+        }
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        current = parent;
+    }
+}
+
+fn remove_file_and_prune(file_path: &Path, stop_at: &Path) -> Result<(), String> {
+    match std::fs::remove_file(file_path) {
+        Ok(()) => {},
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(format!("Failed to remove {}: {err}", file_path.display())),
+    }
+    if let Some(parent) = file_path.parent() {
+        prune_empty_ancestors(parent, stop_at);
+    }
+    Ok(())
+}
+
+fn is_tkg_hook_item(item: &serde_json::Value) -> bool {
+    item.get("command")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|cmd| cmd.contains("tkg-hooks "))
+}
+
+fn strip_tkg_hooks_from_events_map(
+    events_obj: &mut serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let mut changed = false;
+    let mut empty_events = Vec::new();
+
+    for (event_name, entry_list) in events_obj.iter_mut() {
+        let Some(arr) = entry_list.as_array_mut() else {
+            continue;
+        };
+        let before_len = arr.len();
+        arr.retain_mut(|item| {
+            if is_tkg_hook_item(item) {
+                return false;
+            }
+            if let Some(nested) = item
+                .get_mut("hooks")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                let inner_before = nested.len();
+                nested.retain(|h| !is_tkg_hook_item(h));
+                if nested.len() != inner_before {
+                    changed = true;
+                }
+                return !nested.is_empty();
+            }
+            true
+        });
+        if arr.len() != before_len {
+            changed = true;
+        }
+        if arr.is_empty() {
+            empty_events.push(event_name.clone());
+        }
+    }
+
+    for event_name in empty_events {
+        events_obj.remove(&event_name);
+    }
+    changed
+}
+
+fn remove_mcp_server_from_obj(
+    root_obj: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> bool {
+    let Some(servers_val) = root_obj.get_mut(key) else {
+        return false;
+    };
+    let Some(servers_obj) = servers_val.as_object_mut() else {
+        return false;
+    };
+    let removed = servers_obj.remove("torqkage").is_some();
+    if servers_obj.is_empty() {
+        root_obj.remove(key);
+    }
+    removed
+}
+
+fn json_only_contains_boilerplate(
+    root_obj: &serde_json::Map<String, serde_json::Value>,
+    boilerplate: &[(&str, &str)],
+) -> bool {
+    root_obj.is_empty()
+        || root_obj.iter().all(|(k, v)| {
+            boilerplate.iter().any(|(bk, bv)| {
+                k == bk
+                    && match v {
+                        serde_json::Value::String(s) => s == bv,
+                        serde_json::Value::Number(n) => n.to_string() == *bv,
+                        _ => false,
+                    }
+            })
+        })
+}
+
+fn write_or_delete_json(
+    config_path: &Path,
+    config: &serde_json::Value,
+    boilerplate: &[(&str, &str)],
+    stop_prune_at: &Path,
+) -> Result<(), String> {
+    if let Some(obj) = config.as_object()
+        && json_only_contains_boilerplate(obj, boilerplate)
+    {
+        return remove_file_and_prune(config_path, stop_prune_at);
+    }
+    write_pretty_json_atomic(config_path, config)
+}
+
+fn eject_mcp_json_file(
+    config_path: &Path,
+    servers_key: &str,
+    boilerplate: &[(&str, &str)],
+    stop_prune_at: &Path,
+) -> Result<bool, String> {
+    if !config_path.is_file() {
+        return Ok(false);
+    }
+    let mut config = read_or_init_json_object(config_path, serde_json::json!({}))?;
+    let changed = config
+        .as_object_mut()
+        .is_some_and(|obj| remove_mcp_server_from_obj(obj, servers_key));
+    if !changed {
+        return Ok(false);
+    }
+    write_or_delete_json(config_path, &config, boilerplate, stop_prune_at)?;
+    Ok(true)
+}
+
+fn eject_hooks_json_file(
+    hooks_path: &Path,
+    nested_hooks_key: Option<&str>,
+    boilerplate: &[(&str, &str)],
+    stop_prune_at: &Path,
+) -> Result<bool, String> {
+    if !hooks_path.is_file() {
+        return Ok(false);
+    }
+    let mut cfg = read_or_init_json_object(hooks_path, serde_json::json!({}))?;
+    let changed = cfg.as_object_mut().is_some_and(|root_obj| {
+        if let Some(container_key) = nested_hooks_key {
+            let Some(container) = root_obj
+                .get_mut(container_key)
+                .and_then(serde_json::Value::as_object_mut)
+            else {
+                return false;
+            };
+            let modified = strip_tkg_hooks_from_events_map(container);
+            if container.is_empty() {
+                root_obj.remove(container_key);
+            }
+            modified
+        } else {
+            strip_tkg_hooks_from_events_map(root_obj)
+        }
+    });
+    if !changed {
+        return Ok(false);
+    }
+    write_or_delete_json(hooks_path, &cfg, boilerplate, stop_prune_at)?;
+    Ok(true)
+}
+
+fn format_ejected_paths(paths: Vec<PathBuf>) -> Vec<String> {
+    paths
+        .into_iter()
+        .map(|p| {
+            if p.is_file() {
+                format!("✔ Removed TorqKage entries from {}", p.display())
+            } else {
+                format!("✔ Removed empty TorqKage config {}", p.display())
+            }
+        })
+        .collect()
+}
+
+/// Removes `TorqKage` MCP registration from `opencode.json`.
+///
+/// # Errors
+/// Returns an error if an existing `opencode.json` is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_opencode_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let config_path = workspace_root.join("opencode.json");
+    let mut touched = Vec::new();
+    if eject_mcp_json_file(
+        &config_path,
+        "mcpServers",
+        &[("$schema", "https://opencode.ai/schema.json")],
+        workspace_root,
+    )? {
+        touched.push(config_path);
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` entries from `.mcp.json` and `.claude/settings.json`.
+///
+/// # Errors
+/// Returns an error if any existing config is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_claude_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let mut touched = Vec::new();
+    let mcp_path = workspace_root.join(".mcp.json");
+    if eject_mcp_json_file(&mcp_path, "mcpServers", &[], workspace_root)? {
+        touched.push(mcp_path);
+    }
+    let settings_path = workspace_root.join(".claude/settings.json");
+    if eject_hooks_json_file(&settings_path, Some("hooks"), &[], workspace_root)? {
+        touched.push(settings_path);
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` entries from `.cursor/mcp.json` and `.cursor/hooks.json`.
+///
+/// # Errors
+/// Returns an error if any existing config is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_cursor_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let mut touched = Vec::new();
+    let mcp_path = workspace_root.join(".cursor/mcp.json");
+    if eject_mcp_json_file(&mcp_path, "mcpServers", &[], workspace_root)? {
+        touched.push(mcp_path);
+    }
+    let hooks_path = workspace_root.join(".cursor/hooks.json");
+    if eject_hooks_json_file(
+        &hooks_path,
+        Some("hooks"),
+        &[("version", "1")],
+        workspace_root,
+    )? {
+        touched.push(hooks_path);
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` entries from `.codex/config.toml` and `.codex/hooks.json`.
+///
+/// # Errors
+/// Returns an error if existing files are invalid TOML/JSON or cannot be
+/// updated/removed.
+pub fn eject_codex_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let mut touched = Vec::new();
+    let toml_path = workspace_root.join(".codex/config.toml");
+    if toml_path.is_file() {
+        let raw = std::fs::read_to_string(&toml_path)
+            .map_err(|e| format!("Failed to read {}: {e}", toml_path.display()))?;
+        if !raw.trim().is_empty() {
+            let mut table: toml::Table = toml::from_str(&raw)
+                .map_err(|e| format!("Failed to parse TOML in {}: {e}", toml_path.display()))?;
+            let removed = if let Some(mcp_table) = table
+                .get_mut("mcp_servers")
+                .and_then(toml::Value::as_table_mut)
+            {
+                let did_remove = mcp_table.remove("torqkage").is_some();
+                if mcp_table.is_empty() {
+                    table.remove("mcp_servers");
+                }
+                did_remove
+            } else {
+                false
+            };
+            if removed {
+                if table.is_empty() {
+                    remove_file_and_prune(&toml_path, workspace_root)?;
+                } else {
+                    let serialized = toml::to_string_pretty(&table)
+                        .map_err(|e| format!("Failed to serialize {}: {e}", toml_path.display()))?;
+                    atomic_write(&toml_path, serialized.as_bytes())
+                        .map_err(|e| format!("Failed to write {}: {e}", toml_path.display()))?;
+                }
+                touched.push(toml_path);
+            }
+        }
+    }
+
+    let hooks_path = workspace_root.join(".codex/hooks.json");
+    if eject_hooks_json_file(&hooks_path, None, &[], workspace_root)? {
+        touched.push(hooks_path);
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` MCP and hook entries from `.gemini/settings.json`.
+///
+/// # Errors
+/// Returns an error if `.gemini/settings.json` is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_gemini_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let settings_path = workspace_root.join(".gemini/settings.json");
+    if !settings_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let mut settings = read_or_init_json_object(&settings_path, serde_json::json!({}))?;
+    let mut changed = false;
+    if let Some(root_obj) = settings.as_object_mut() {
+        if remove_mcp_server_from_obj(root_obj, "mcpServers") {
+            changed = true;
+        }
+        if let Some(hooks_obj) = root_obj
+            .get_mut("hooks")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            if strip_tkg_hooks_from_events_map(hooks_obj) {
+                changed = true;
+            }
+            if hooks_obj.is_empty() {
+                root_obj.remove("hooks");
+            }
+        }
+    }
+    if !changed {
+        return Ok(Vec::new());
+    }
+    write_or_delete_json(&settings_path, &settings, &[], workspace_root)?;
+    Ok(format_ejected_paths(vec![settings_path]))
+}
+
+/// Removes `TorqKage` MCP registration from `.vscode/mcp.json`.
+///
+/// # Errors
+/// Returns an error if `.vscode/mcp.json` is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_vscode_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let mcp_path = workspace_root.join(".vscode/mcp.json");
+    let mut touched = Vec::new();
+    if eject_mcp_json_file(&mcp_path, "servers", &[], workspace_root)? {
+        touched.push(mcp_path);
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` MCP registration from `.vscode/mcp.json` and hooks from
+/// `.github/hooks/torqkage.json`.
+///
+/// # Errors
+/// Returns an error if any existing config is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_github_copilot_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let mut touched = Vec::new();
+    let mcp_path = workspace_root.join(".vscode/mcp.json");
+    if eject_mcp_json_file(&mcp_path, "servers", &[], workspace_root)? {
+        touched.push(mcp_path);
+    }
+    let hooks_path = workspace_root.join(".github/hooks/torqkage.json");
+    if eject_hooks_json_file(
+        &hooks_path,
+        Some("hooks"),
+        &[("version", "1")],
+        workspace_root,
+    )? {
+        touched.push(hooks_path);
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` MCP registration from `.roo/mcp.json`.
+///
+/// # Errors
+/// Returns an error if `.roo/mcp.json` is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_roo_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let config_path = workspace_root.join(".roo/mcp.json");
+    let mut touched = Vec::new();
+    if eject_mcp_json_file(&config_path, "mcpServers", &[], workspace_root)? {
+        touched.push(config_path);
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` MCP registration from an explicit Windsurf config file.
+///
+/// # Errors
+/// Returns an error if the config file is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_windsurf_config_at(config_path: &Path) -> Result<Vec<String>, String> {
+    let stop_at = config_path.parent().unwrap_or_else(|| Path::new("/"));
+    let mut touched = Vec::new();
+    if eject_mcp_json_file(config_path, "mcpServers", &[], stop_at)? {
+        touched.push(config_path.to_path_buf());
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` MCP registration from the resolved Windsurf config path.
+///
+/// # Errors
+/// Returns an error if the config file is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_windsurf_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    eject_windsurf_config_at(&windsurf_mcp_config_path(workspace_root))
+}
+
+/// Removes `TorqKage` MCP registration from an explicit Cline settings file.
+///
+/// # Errors
+/// Returns an error if the settings file is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_cline_config_at(config_path: &Path) -> Result<Vec<String>, String> {
+    let stop_at = config_path.parent().unwrap_or_else(|| Path::new("/"));
+    let mut touched = Vec::new();
+    if eject_mcp_json_file(config_path, "mcpServers", &[], stop_at)? {
+        touched.push(config_path.to_path_buf());
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes `TorqKage` MCP registration from the resolved Cline settings path.
+///
+/// # Errors
+/// Returns an error if the settings file is invalid JSON or cannot be
+/// updated/removed.
+pub fn eject_cline_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    eject_cline_config_at(&cline_mcp_config_path(workspace_root))
+}
+
+/// Removes the generated standalone `.tkg/state/mcp_servers.json`.
+///
+/// # Errors
+/// Returns an error if `.tkg/state/mcp_servers.json` is invalid JSON or cannot
+/// be removed.
+pub fn eject_custom_mcp_config(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let config_path = workspace_root.join(".tkg/state/mcp_servers.json");
+    let mut touched = Vec::new();
+    if eject_mcp_json_file(&config_path, "mcpServers", &[], workspace_root)? {
+        touched.push(config_path);
+    }
+    Ok(format_ejected_paths(touched))
+}
+
+/// Removes the installed plugin bundle directory/symlink for `runner` if
+/// present (e.g. `~/.gemini/config/plugins/torqkage` for Antigravity).
+///
+/// # Errors
+/// Returns an error if the plugin bundle exists and cannot be removed.
+pub fn eject_plugin_dir(runner: &ProjectRunnerConfig) -> Result<Vec<String>, String> {
+    let Some(dest) = plugin_install_dir(runner) else {
+        return Ok(Vec::new());
+    };
+    let Ok(meta) = dest.symlink_metadata() else {
+        return Ok(Vec::new());
+    };
+    if meta.file_type().is_symlink() || !dest.is_dir() {
+        std::fs::remove_file(&dest)
+            .map_err(|e| format!("Failed to remove plugin link {}: {e}", dest.display()))?;
+    } else {
+        std::fs::remove_dir_all(&dest)
+            .map_err(|e| format!("Failed to remove plugin dir {}: {e}", dest.display()))?;
+    }
+    Ok(vec![format!(
+        "✔ Removed installed plugin bundle at {}",
+        dest.display()
+    )])
 }
 
 #[cfg(test)]
@@ -444,6 +1365,95 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("tkg-mcp")
         );
+        let cursor_hooks: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(temp_ws.join(".cursor/hooks.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            cursor_hooks
+                .pointer("/hooks/preToolUse/0/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-hooks pre-tool-use")
+        );
+
+        register_codex_config(&temp_ws).unwrap();
+        let codex_toml: toml::Table =
+            toml::from_str(&std::fs::read_to_string(temp_ws.join(".codex/config.toml")).unwrap())
+                .unwrap();
+        assert_eq!(
+            codex_toml
+                .get("mcp_servers")
+                .and_then(|v| v.get("torqkage"))
+                .and_then(|v| v.get("command"))
+                .and_then(toml::Value::as_str),
+            Some("tkg-mcp")
+        );
+        let codex_hooks: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(temp_ws.join(".codex/hooks.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            codex_hooks
+                .pointer("/PreToolUse/0/hooks/0/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-hooks pre-tool-use")
+        );
+
+        register_gemini_config(&temp_ws).unwrap();
+        let gemini_cfg: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(temp_ws.join(".gemini/settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            gemini_cfg
+                .pointer("/mcpServers/torqkage/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-mcp")
+        );
+        assert_eq!(
+            gemini_cfg
+                .pointer("/hooks/BeforeTool/0/hooks/0/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-hooks pre-tool-use")
+        );
+
+        register_github_copilot_config(&temp_ws).unwrap();
+        let vscode_cfg: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(temp_ws.join(".vscode/mcp.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            vscode_cfg
+                .pointer("/servers/torqkage/type")
+                .and_then(serde_json::Value::as_str),
+            Some("stdio")
+        );
+        let gh_hooks: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(temp_ws.join(".github/hooks/torqkage.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            gh_hooks
+                .pointer("/hooks/preToolUse/0/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-hooks pre-tool-use")
+        );
+
+        register_roo_config(&temp_ws).unwrap();
+        let roo_cfg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(temp_ws.join(".roo/mcp.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            roo_cfg
+                .pointer("/mcpServers/torqkage/command")
+                .and_then(serde_json::Value::as_str),
+            Some("tkg-mcp")
+        );
+
+        register_windsurf_config_at(&temp_ws.join("windsurf_mcp.json")).unwrap();
+        register_cline_config_at(&temp_ws.join("cline_mcp.json")).unwrap();
+        assert!(temp_ws.join("windsurf_mcp.json").is_file());
+        assert!(temp_ws.join("cline_mcp.json").is_file());
 
         register_custom_mcp_config(&temp_ws).unwrap();
         let custom_cfg: serde_json::Value = serde_json::from_str(
@@ -524,5 +1534,129 @@ mod tests {
         assert!(err.contains("Failed to parse JSON"));
 
         _ = std::fs::remove_dir_all(&temp_ws);
+    }
+
+    #[test]
+    fn test_register_codex_preserves_existing_toml_keys() {
+        let temp_ws =
+            std::env::temp_dir().join(format!("tkg_codex_merge_test_{}", std::process::id()));
+        _ = std::fs::remove_dir_all(&temp_ws);
+        std::fs::create_dir_all(temp_ws.join(".codex")).unwrap();
+
+        std::fs::write(
+            temp_ws.join(".codex/config.toml"),
+            "model = \"o4-mini\"\n\n[mcp_servers.other]\ncommand = \"other-mcp\"\n",
+        )
+        .unwrap();
+
+        register_codex_config(&temp_ws).unwrap();
+        register_codex_config(&temp_ws).unwrap();
+
+        let parsed: toml::Table =
+            toml::from_str(&std::fs::read_to_string(temp_ws.join(".codex/config.toml")).unwrap())
+                .unwrap();
+        assert_eq!(
+            parsed.get("model").and_then(toml::Value::as_str),
+            Some("o4-mini")
+        );
+        assert_eq!(
+            parsed
+                .get("mcp_servers")
+                .and_then(|v| v.get("other"))
+                .and_then(|v| v.get("command"))
+                .and_then(toml::Value::as_str),
+            Some("other-mcp")
+        );
+        assert_eq!(
+            parsed
+                .get("mcp_servers")
+                .and_then(|v| v.get("torqkage"))
+                .and_then(|v| v.get("command"))
+                .and_then(toml::Value::as_str),
+            Some("tkg-mcp")
+        );
+
+        _ = std::fs::remove_dir_all(&temp_ws);
+    }
+
+    #[test]
+    fn test_eject_workspace_harnesses_clean_and_preserve_user_keys() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let ws = temp_dir.path();
+
+        // Register all workspace harnesses cleanly from scratch, then eject -> zero files remain.
+        register_claude_config(ws).unwrap();
+        register_cursor_config(ws).unwrap();
+        register_codex_config(ws).unwrap();
+        register_gemini_config(ws).unwrap();
+        register_github_copilot_config(ws).unwrap();
+        register_opencode_config(ws).unwrap();
+        register_roo_config(ws).unwrap();
+        register_custom_mcp_config(ws).unwrap();
+
+        assert_ne!(eject_claude_config(ws).unwrap(), Vec::<String>::new());
+        assert_ne!(eject_cursor_config(ws).unwrap(), Vec::<String>::new());
+        assert_ne!(eject_codex_config(ws).unwrap(), Vec::<String>::new());
+        assert_ne!(eject_gemini_config(ws).unwrap(), Vec::<String>::new());
+        assert_ne!(
+            eject_github_copilot_config(ws).unwrap(),
+            Vec::<String>::new()
+        );
+        assert_ne!(eject_opencode_config(ws).unwrap(), Vec::<String>::new());
+        assert_ne!(eject_roo_config(ws).unwrap(), Vec::<String>::new());
+        assert_ne!(eject_custom_mcp_config(ws).unwrap(), Vec::<String>::new());
+
+        for leftover in [
+            ".mcp.json",
+            ".claude",
+            ".cursor",
+            ".codex",
+            ".gemini",
+            ".github",
+            ".vscode",
+            "opencode.json",
+            ".roo",
+            ".tkg",
+        ] {
+            assert!(!ws.join(leftover).exists(), "{leftover} should be removed");
+        }
+
+        // Now verify existing user keys in Codex, Gemini, and Windsurf are preserved.
+        std::fs::create_dir_all(ws.join(".codex")).unwrap();
+        std::fs::write(
+            ws.join(".codex/config.toml"),
+            "model = \"o4-mini\"\n\n[mcp_servers.other]\ncommand = \"other\"\n",
+        )
+        .unwrap();
+        register_codex_config(ws).unwrap();
+        assert_ne!(eject_codex_config(ws).unwrap(), Vec::<String>::new());
+        let codex_after = std::fs::read_to_string(ws.join(".codex/config.toml")).unwrap();
+        assert!(codex_after.contains("o4-mini"));
+        assert!(codex_after.contains("other"));
+        assert!(!codex_after.contains("torqkage"));
+        assert!(!ws.join(".codex/hooks.json").exists());
+
+        std::fs::create_dir_all(ws.join(".gemini")).unwrap();
+        std::fs::write(
+            ws.join(".gemini/settings.json"),
+            r#"{"theme":"dark","hooks":{"BeforeTool":[{"matcher":"*","hooks":[{"type":"command","command":"my-guard"}]}]}}"#,
+        )
+        .unwrap();
+        register_gemini_config(ws).unwrap();
+        assert_ne!(eject_gemini_config(ws).unwrap(), Vec::<String>::new());
+        let gem_after = std::fs::read_to_string(ws.join(".gemini/settings.json")).unwrap();
+        assert!(gem_after.contains("theme"));
+        assert!(gem_after.contains("my-guard"));
+        assert!(!gem_after.contains("tkg-hooks"));
+        assert!(!gem_after.contains("torqkage"));
+
+        let windsurf_file = ws.join("windsurf_mcp.json");
+        register_windsurf_config_at(&windsurf_file).unwrap();
+        assert!(windsurf_file.is_file());
+        assert_ne!(
+            eject_windsurf_config_at(&windsurf_file).unwrap(),
+            Vec::<String>::new()
+        );
+        assert!(!windsurf_file.exists());
     }
 }

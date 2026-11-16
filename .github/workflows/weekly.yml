@@ -7,9 +7,10 @@ on:
 
 jobs:
   weekly-audit:
+    name: Mutation & Outdated Dependency Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -17,3 +18,43 @@ jobs:
           tool: cargo-nextest,cargo-mutants,cargo-outdated
       - run: cargo outdated --root-deps-only
       - run: cargo mutants --config .cargo/mutants.toml --profile ci
+
+  fuzz-smoke:
+    name: Time-Boxed Coverage Fuzzing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz parsers (15s)
+        run: cargo +nightly fuzz run fuzz_parsers -- -max_total_time=15
+      - name: Fuzz content filter (15s)
+        run: cargo +nightly fuzz run fuzz_content_filter -- -max_total_time=15
+      - name: Fuzz hook dialects & manifest paths (15s)
+        run: cargo +nightly fuzz run fuzz_hook_dialects -- -max_total_time=15
+
+  sanitizers-and-geiger:
+    name: Sanitizers, Careful & Transitive Unsafe Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-careful,cargo-geiger
+      - name: Transitive dependency unsafe report (cargo-geiger)
+        run: cargo geiger --all-features --output-format GitHubMarkdown || true
+      - name: Stdlib debug assertions & UB checks (cargo-careful)
+        run: cargo +nightly careful nextest run --workspace --profile ci
+      - name: AddressSanitizer + LeakSanitizer on native tests
+        env:
+          RUSTFLAGS: "-Zsanitizer=address -Copt-level=1 -Cdebuginfo=line-tables-only"
+        run: |
+          TARGET="$(rustc +nightly --print host-tuple)"
+          cargo +nightly test -Zbuild-std --workspace --target "$TARGET"

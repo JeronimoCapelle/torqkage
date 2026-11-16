@@ -9,9 +9,14 @@ category = "testing"
 enforce_sandbox = true
 command = ["cargo", "test"]
 args = [
-    { name = "target", required = false, default = "--all-targets", enum = ["--all-targets", "--lib", "--bins", "--examples"], description = "Target scope" },
+    { name = "target", required = false, default = "--all-targets", enum = [
+        "--all-targets",
+        "--lib",
+        "--bins",
+        "--examples",
+    ], description = "Target scope" },
     { name = "package", required = false, flag = "-p", regex = "^[a-zA-Z0-9_-]+$", description = "Specific crate package name" },
-    { name = "filter", required = false, flag = "--", regex = "^[a-zA-Z0-9_:]+$", description = "Test name filter" }
+    { name = "filter", required = false, flag = "--", regex = "^[a-zA-Z0-9_:]+$", description = "Test name filter" },
 ]
 output_capture = "stdout"
 truncate_lines = 100

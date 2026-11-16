@@ -73,10 +73,11 @@ min-size bin="tkg-hooks" *args:
         ls -lh "target/min-size/{{bin}}"
     fi
 
-# Format check and strict Clippy gate across all targets and features
+# Format check, strict Clippy, and feature-powerset verification across all targets
 lint:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
+    cargo hack clippy --workspace --all-targets --feature-powerset -- -D warnings
 
 # AI Coding Agent fixed-point auto-fix loop (rustc + clippy --fix <=5 passes + fmt + verify)
 [no-cd]
@@ -105,8 +106,11 @@ fix:
         PASS=$((PASS + 1))
     done
 
-    # 3. Format cleanly according to rustfmt.toml
+    # 3. Format cleanly according to rustfmt.toml and .taplo.toml
     cargo fmt --all
+    if command -v taplo >/dev/null 2>&1; then
+        taplo fmt
+    fi
 
     # 4. Final strict verification
     cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -142,15 +146,41 @@ careful *args:
     RUSTFLAGS="-Copt-level=1 -Cdebuginfo=line-tables-only -Clink-arg=-fuse-ld=lld" \
         cargo +nightly careful nextest run --workspace {{args}}
 
-# Run supply-chain, unused dependency, and spellcheck audits
+# Run supply-chain, unused dependency, spellcheck, and TOML hygiene audits
 audit:
     cargo deny check
     cargo machete
     typos
+    taplo fmt --check
 
 # Run full CI quality gate locally
 verify: lint test audit
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+
+# Run source-based code coverage summary across all workspace tests
+cov *args:
+    cargo llvm-cov nextest --workspace --all-features --locked --summary-only {{args}}
+
+# Generate HTML code coverage report in target/llvm-cov/html/
+cov-html *args:
+    cargo llvm-cov nextest --workspace --all-features --locked --html {{args}}
+
+# Run microbenchmarks (divan) and verify deterministic gungraun benchmarks compile
+bench *args:
+    cargo bench -p tkg-common --bench core_benches -- {{args}}
+
+# Measure cold-start latency of release tkg-hooks with hyperfine
+bench-cold-start:
+    cargo build --release -p tkg-hooks --locked
+    hyperfine --warmup 5 --runs 50 --shell=none 'target/release/tkg-hooks --help'
+
+# Run coverage-guided fuzzer (default: fuzz_parsers for 30s; override target or time)
+fuzz target="fuzz_parsers" secs="30":
+    cargo +nightly fuzz run {{target}} -- -max_total_time={{secs}}
+
+# Visualize module hierarchy and public visibility across tkg-common
+modules crate="tkg-common":
+    cargo modules structure -p {{crate}}
 
 # Run mutation testing focused on security guards and parsers (uses Cranelift fast preset if available)
 mutants *args:

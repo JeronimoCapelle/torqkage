@@ -2743,6 +2743,7 @@ dependencies = [
 name = "tkg-hooks"
 version = "0.1.7"
 dependencies = [
+ "proptest",
  "serde",
  "serde_json",
  "tkg-common",
@@ -2760,6 +2761,7 @@ dependencies = [
  "ignore",
  "insta",
  "mpatch",
+ "proptest",
  "regex",
  "serde",
  "serde_json",
@@ -2855,6 +2857,8 @@ version = "0.1.7"
 dependencies = [
  "crossterm",
  "ratatui",
+ "tempfile",
+ "thiserror 2.0.21",
  "tkg-common",
  "toml",
  "toml_edit",

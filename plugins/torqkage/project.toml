@@ -79,11 +79,7 @@ containers = ["crates", "packages"]
 # Build cache, intermediate artifacts, and directories that should be IGNORED
 # by Jujutsu/Git diffs, WIP turn-by-turn tracking, and session handoffs.
 # Files inside these paths will not trigger dirty warnings or strike penalties.
-ignored_paths = [
-    "target",
-    ".tkg/state",
-    ".tkg/workspaces",
-]
+ignored_paths = ["target", ".tkg/state", ".tkg/workspaces"]
 
 
 # ------------------------------------------------------------------------------
@@ -94,9 +90,7 @@ ignored_paths = [
 # execution sandbox when running compilation, testing, or tool commands.
 # Ensures that compilation caches are preserved across tool calls while preventing
 # host filesystem escape.
-bind_mounts = [
-    "target",
-]
+bind_mounts = ["target"]
 
 
 # ------------------------------------------------------------------------------
@@ -175,11 +169,7 @@ test_prefixes = ["test_"]
 [docs]
 # List of directories or files containing specifications, architectural docs,
 # API contracts, or schemas.
-paths = [
-    "docs",
-    "ARCHITECTURE.md",
-    "README.md",
-]
+paths = ["docs", "ARCHITECTURE.md", "README.md"]
 
 # The name of the MCP tool recommended to agents for querying these documents.
 # tkg-hooks will inject this recommendation into the agent's wake prompt.

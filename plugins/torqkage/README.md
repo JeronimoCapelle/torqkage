@@ -1,6 +1,6 @@
 # TorqKage: High-Assurance Systems Programming & Agent Orchestration Plugin
 
-[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](../../LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](../../LICENSE-MIT)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Arch%20%7C%20CachyOS-green.svg)](https://archlinux.org)
 [![VCS](https://img.shields.io/badge/vcs-Jujutsu%20%2B%20Git-purple.svg)](https://github.com/martinvonz/jj)
 

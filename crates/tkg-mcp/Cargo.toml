@@ -27,6 +27,15 @@ grep-searcher = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+proptest = { workspace = true }
 
 [lints]
 workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/torqkage-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"

@@ -1364,4 +1364,81 @@ mod tests {
         assert!(pruned.contains("error[E0308]: mismatched types"));
         assert!(!pruned.contains("Compiling crate_500"));
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+        #[test]
+        fn prop_resolve_safe_path_rejects_escapes_and_stays_inside_root(
+            subdir in "[a-z]{2,8}",
+            file in "[a-z0-9_]{1,10}\\.rs",
+            traversal in prop::collection::vec(prop_oneof![Just(".."), Just("."), Just("escape")], 1..5),
+        ) {
+            let dir = std::env::temp_dir().join(format!("tkg_mcp_prop_ws_{}", std::process::id()));
+            std::fs::create_dir_all(&dir).expect("mkdir temp ws");
+            let canonical_ws = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+
+            // Valid nested workspace-relative path resolves strictly inside workspace root
+            let valid_rel = format!("{subdir}/{file}");
+            let ok_path = resolve_safe_path(&dir, &valid_rel, std::slice::from_ref(&subdir), true);
+            prop_assert!(ok_path.is_ok(), "valid path failed: {ok_path:?}");
+            if let Ok(resolved) = ok_path {
+                prop_assert!(resolved.starts_with(&dir) || resolved.starts_with(&canonical_ws));
+            }
+
+            // Explicit traversal or root escape must fail closed
+            let escaped = format!("{subdir}/{}/{file}", traversal.join("/"));
+            if traversal.contains(&"..") {
+                prop_assert!(resolve_safe_path(&dir, &escaped, &[], true).is_err());
+            }
+
+            let root_escape = if cfg!(windows) {
+                format!("C:\\Windows\\System32\\{file}")
+            } else {
+                format!("/etc/{file}")
+            };
+            prop_assert!(resolve_safe_path(&dir, &root_escape, &[], true).is_err());
+        }
+
+        #[test]
+        fn prop_truncate_output_and_strip_ansi_bound_output(
+            lines in prop::collection::vec("\\PC{0,40}", 0..40),
+            max_lines in 0usize..=15,
+            max_bytes in 1usize..=200,
+        ) {
+            let raw = lines.join("\n");
+            let ansi_wrapped = format!("\u{1b}[31m{raw}\u{1b}[0m");
+            let stripped = strip_ansi(&ansi_wrapped);
+            let has_ansi = stripped.contains("\u{1b}[");
+            prop_assert!(!has_ansi);
+
+            let bounded = truncate_output(&raw, Some(max_lines), Some(max_bytes), false);
+            prop_assert!(bounded.len() <= max_bytes);
+            if max_lines == 0 && raw.lines().count() > 0 {
+                prop_assert!(bounded.is_empty());
+            } else {
+                prop_assert!(bounded.lines().count() <= max_lines.max(1));
+            }
+        }
+
+        #[test]
+        fn prop_filter_output_never_exceeds_max_lines(
+            lines in prop::collection::vec("[a-zA-Z0-9 :_-]{1,30}", 0..60),
+            max_lines in 1usize..=20,
+        ) {
+            let raw = lines.join("\n");
+            let filter = tkg_common::tools::ToolOutputFilter {
+                keep_regex: vec!["error".to_owned()],
+                drop_regex: vec!["Compiling".to_owned()],
+                max_lines: Some(max_lines),
+            };
+            let out = filter_output(&raw, &filter);
+            // filter_output may append one "... trimmed ..." summary line on overflow
+            prop_assert!(out.lines().count() <= max_lines + 3);
+        }
+        }
+    }
 }

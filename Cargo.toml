@@ -1,29 +1,19 @@
 
 [workspace]
 resolver = "3"
-members = [
-    "crates/tkg-common",
-    "crates/tkg-mcp",
-    "crates/tkg-hooks",
-    "crates/tkg-ctrl",
-]
+members = ["crates/tkg-common", "crates/tkg-mcp", "crates/tkg-hooks", "crates/tkg-ctrl"]
 exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.7"
 edition = "2024"
-license = "AGPL-3.0-or-later"
+license = "MIT OR Apache-2.0"
 authors = ["Jerónimo Capelle"]
 repository = "https://github.com/JeronimoCapelle/torqkage"
 documentation = "https://jeronimocapelle.github.io/torqkage/"
 readme = "README.md"
 keywords = ["mcp", "ai", "agents", "sandbox", "cli"]
-categories = [
-    "command-line-utilities",
-    "development-tools",
-    "config",
-    "os::linux-apis",
-]
+categories = ["command-line-utilities", "development-tools", "config", "os::linux-apis"]
 
 [workspace.dependencies]
 # Internal workspace crates
@@ -89,12 +79,12 @@ unused_qualifications = "warn"
 
 [workspace.lints.clippy]
 correctness = { level = "deny", priority = -1 }
-suspicious  = { level = "deny", priority = -1 }
-style       = { level = "warn", priority = -1 }
-complexity  = { level = "warn", priority = -1 }
-perf        = { level = "warn", priority = -1 }
-pedantic    = { level = "warn", priority = -1 }
-cargo       = { level = "warn", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
 
 # Curated high-signal `nursery` lints (avoids experimental false positives)
 use_self = "warn"

@@ -18,6 +18,13 @@ use tkg_common::{
 pub(crate) const DEFAULT_TOOL_CATEGORY: &str = "Tools";
 
 /// In-memory representation of an MCP tool loaded from `tools.toml`.
+#[cfg_attr(
+    not(feature = "tui"),
+    allow(
+        dead_code,
+        reason = "Deserialized tool fields inspected by optional TUI catalog"
+    )
+)]
 #[derive(Debug, Clone)]
 pub(crate) struct ToolItem {
     pub(crate) name: String,
@@ -69,7 +76,10 @@ impl ToolItem {
             modified: false,
         }
     }
+}
 
+#[cfg(feature = "tui")]
+impl ToolItem {
     #[must_use]
     pub(crate) const fn mutating(&self) -> bool {
         self.safety.mutating
@@ -138,6 +148,7 @@ pub(crate) fn load_tools_from_file(path: &Path) -> Result<Vec<ToolItem>, String>
 ///
 /// # Errors
 /// Returns an error if reading, parsing, or writing the file fails.
+#[cfg(any(feature = "tui", test))]
 pub(crate) fn update_tool_permission_gate_in_file(
     file_path: &Path,
     tool_name: &str,
@@ -182,6 +193,13 @@ pub(crate) struct AgentRoleFlags {
 }
 
 /// Agent manifest parsed from an agent Markdown file with YAML frontmatter.
+#[cfg_attr(
+    not(feature = "tui"),
+    allow(
+        dead_code,
+        reason = "Deserialized manifest fields inspected by optional TUI panels"
+    )
+)]
 #[derive(Debug, Clone)]
 pub(crate) struct AgentManifest {
     pub(crate) file_path: PathBuf,
@@ -243,6 +261,7 @@ impl AgentManifest {
     }
 
     /// Converts this `AgentManifest` back into a canonical `AgentFrontmatter`.
+    #[cfg(any(feature = "tui", test))]
     #[must_use]
     pub(crate) fn to_frontmatter(&self) -> AgentFrontmatter {
         AgentFrontmatter {
@@ -268,12 +287,14 @@ impl AgentManifest {
     }
 
     /// Checks whether an MCP tool is allowed for this agent.
+    #[cfg(feature = "tui")]
     #[must_use]
     pub(crate) fn allows_mcp_tool(&self, tool_name: &str) -> bool {
         self.mcp_tools.iter().any(|t| t == tool_name)
     }
 
     /// Toggles an MCP tool on or off in this agent's allowlist.
+    #[cfg(feature = "tui")]
     pub(crate) fn toggle_mcp_tool(&mut self, tool_name: &str) {
         if let Some(pos) = self.mcp_tools.iter().position(|t| t == tool_name) {
             self.mcp_tools.remove(pos);
@@ -287,6 +308,7 @@ impl AgentManifest {
     /// Cycles the agent's permission mode and command execution policy:
     /// Autonomous (acceptEdits / off) -> Supervised (acceptEdits / ask) ->
     /// Planning (plan / off).
+    #[cfg(feature = "tui")]
     pub(crate) fn cycle_permission_policy(&mut self) -> &'static str {
         let desc = match (
             self.permission_mode.as_str(),
@@ -322,6 +344,7 @@ impl AgentManifest {
 
     /// Serializes this agent manifest to YAML frontmatter + Markdown directives
     /// tailored for `harness`.
+    #[cfg(any(feature = "tui", test))]
     #[must_use]
     pub(crate) fn serialize_for_harness(&self, harness: &dyn tkg_common::Harness) -> String {
         self.to_frontmatter().serialize_for_harness(harness)

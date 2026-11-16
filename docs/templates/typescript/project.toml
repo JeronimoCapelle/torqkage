@@ -9,20 +9,10 @@ version = "0.1.0"
 
 [workspace]
 containers = ["packages", "apps", "libs"]
-ignored_paths = [
-    "node_modules",
-    "dist",
-    ".turbo",
-    ".next",
-    ".tkg/state",
-    ".tkg/workspaces",
-]
+ignored_paths = ["node_modules", "dist", ".turbo", ".next", ".tkg/state", ".tkg/workspaces"]
 
 [sandbox]
-bind_mounts = [
-    "node_modules",
-    ".turbo",
-]
+bind_mounts = ["node_modules", ".turbo"]
 
 [gates.compilation]
 command = ["pnpm", "tsc", "--noEmit"]

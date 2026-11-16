@@ -9,8 +9,11 @@ category = "testing"
 enforce_sandbox = true
 command = ["pnpm", "vitest"]
 args = [
-    { name = "mode", required = false, default = "run", enum = ["run", "related"], description = "Execution mode: run all or related only" },
-    { name = "target", required = false, regex = "^[a-zA-Z0-9_/.-]+$", description = "Test file or spec path" }
+    { name = "mode", required = false, default = "run", enum = [
+        "run",
+        "related",
+    ], description = "Execution mode: run all or related only" },
+    { name = "target", required = false, regex = "^[a-zA-Z0-9_/.-]+$", description = "Test file or spec path" },
 ]
 output_capture = "stdout"
 truncate_lines = 100
@@ -33,3 +36,47 @@ command = ["pnpm", "eslint", ".", "--max-warnings=0"]
 output_capture = "stdout"
 truncate_lines = 50
 timeout_seconds = 30
+
+[tools.npm_test]
+description = "Runs Node/npm project test suite with output truncation and failure circuit breaking"
+action = "static_command"
+category = "testing"
+enforce_sandbox = true
+tracks_circuit_breaker = true
+command = ["npm", "test"]
+output_capture = "stdout"
+truncate_lines = 80
+timeout_seconds = 60
+
+[tools.bun_test]
+description = "Runs Bun's built-in test runner"
+action = "static_command"
+category = "testing"
+enforce_sandbox = true
+tracks_circuit_breaker = true
+command = ["bun", "test"]
+output_capture = "stdout"
+truncate_lines = 80
+timeout_seconds = 45
+
+[tools.biome_check]
+description = "Runs Biome lint + format diagnostics across the project"
+action = "static_command"
+category = "linter"
+command = ["npx", "--no-install", "biome", "check", "."]
+output_capture = "stdout"
+truncate_lines = 50
+timeout_seconds = 30
+
+[tools.playwright_test]
+description = "Executes targeted Playwright end-to-end specs with compact list reporting"
+action = "parameterized_command"
+category = "testing"
+enforce_sandbox = true
+command = ["npx", "--no-install", "playwright", "test", "--reporter=list"]
+args = [
+    { name = "spec", required = false, regex = "^[a-zA-Z0-9_/.-]+$", description = "Optional Playwright spec path" },
+]
+output_capture = "stdout"
+truncate_lines = 80
+timeout_seconds = 90

@@ -9,17 +9,10 @@ version = "0.1.0"
 
 [workspace]
 containers = ["src", "include", "libs"]
-ignored_paths = [
-    "build",
-    ".cache",
-    ".tkg/state",
-    ".tkg/workspaces",
-]
+ignored_paths = ["build", ".cache", ".tkg/state", ".tkg/workspaces"]
 
 [sandbox]
-bind_mounts = [
-    "build",
-]
+bind_mounts = ["build"]
 
 [gates.compilation]
 command = ["cmake", "--build", "build"]

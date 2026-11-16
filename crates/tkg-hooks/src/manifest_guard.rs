@@ -139,4 +139,54 @@ mod tests {
         let resp = evaluate_manifest_guard(&input, Path::new("."), &config);
         assert!(resp.is_none());
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+        #[test]
+        fn prop_fallback_mutators_targeting_protected_manifests_always_ask(
+            tool_prefix in prop_oneof![
+                Just("write"),
+                Just("edit"),
+                Just("modify"),
+                Just("patch"),
+                Just("create"),
+                Just("replace"),
+            ],
+            tool_suffix in "[a-z0-9_]{0,12}",
+            manifest_idx in 0usize..tkg_common::DEFAULT_PROTECTED_MANIFESTS.len(),
+            subdir in prop::option::of("[a-z]{2,8}"),
+        ) {
+            let tool_name = if tool_suffix.is_empty() {
+                tool_prefix.to_owned()
+            } else {
+                format!("{tool_prefix}_{tool_suffix}")
+            };
+            let manifest = tkg_common::DEFAULT_PROTECTED_MANIFESTS
+                .get(manifest_idx)
+                .copied()
+                .unwrap_or("Cargo.toml");
+            let target = subdir.map_or_else(
+                || manifest.to_owned(),
+                |dir| format!("{dir}/{manifest}"),
+            );
+            let input = PreToolUseInput {
+                tool_call: Some(ToolCallPayload {
+                    name: tool_name,
+                    args: json!({ "nested": { "file_path": target } }),
+                }),
+                ..Default::default()
+            };
+            let config = HooksConfig::default();
+            let resp = evaluate_manifest_guard(&input, Path::new("."), &config);
+            prop_assert!(resp.is_some());
+            if let Some(r) = resp {
+                prop_assert_eq!(r.decision, HookDecision::Ask);
+            }
+        }
+        }
+    }
 }

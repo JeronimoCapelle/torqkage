@@ -122,38 +122,56 @@ fn is_candidate_path(s: &str) -> bool {
     !trimmed.is_empty() && !trimmed.contains('\n') && trimmed.len() <= 4096
 }
 
+const MAX_EXTRACTION_DEPTH: usize = 8;
+
 /// Extracts candidate target file path arguments from a tool invocation
-/// payload.
+/// payload (recursing across nested objects and arrays up to bounded depth).
 ///
-/// Priority 1: Inspect keys matching common path or file conventions (`path`,
-/// `file`, `dest`, etc.). Priority 2: If no semantic path keys are present,
-/// inspect any single-line string values in the arguments.
+/// Priority 1: Inspect values under keys matching common path or file
+/// conventions (`path`, `file`, `dest`, etc.). Priority 2: If no semantic path
+/// keys yield candidates, inspect any single-line string values in the payload.
 #[must_use]
 pub fn extract_candidate_paths(args: &serde_json::Value) -> Vec<String> {
     let mut candidates = Vec::new();
-
-    if let serde_json::Value::Object(map) = args {
-        for (k, v) in map {
-            if is_path_key(k)
-                && let Some(s) = v.as_str()
-                && is_candidate_path(s)
-            {
-                candidates.push(s.trim().to_owned());
-            }
-        }
-
-        if candidates.is_empty() {
-            for v in map.values() {
-                if let Some(s) = v.as_str()
-                    && is_candidate_path(s)
-                {
-                    candidates.push(s.trim().to_owned());
-                }
-            }
-        }
+    collect_candidate_strings(args, false, true, 0, &mut candidates);
+    if candidates.is_empty() {
+        collect_candidate_strings(args, false, false, 0, &mut candidates);
     }
-
     candidates
+}
+
+fn collect_candidate_strings(
+    val: &serde_json::Value,
+    under_path_key: bool,
+    require_path_key: bool,
+    depth: usize,
+    out: &mut Vec<String>,
+) {
+    if depth > MAX_EXTRACTION_DEPTH {
+        return;
+    }
+    match val {
+        serde_json::Value::String(s)
+            if (!require_path_key || under_path_key) && is_candidate_path(s) =>
+        {
+            out.push(s.trim().to_owned());
+        },
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_candidate_strings(item, under_path_key, require_path_key, depth + 1, out);
+            }
+        },
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let next_path_key = under_path_key || is_path_key(k);
+                collect_candidate_strings(v, next_path_key, require_path_key, depth + 1, out);
+            }
+        },
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => {},
+    }
 }
 
 #[cfg(test)]
