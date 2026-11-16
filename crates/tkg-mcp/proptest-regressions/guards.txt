@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5a4c3cd071097d9b1890bf12ae0945a968dc79eb55389dfa3c6c2544b564b68b # shrinks to allowed_dir = "aa", denied_dir = "ab", arbitrary = "", attack_variant = 1, sub_file = "_.rs"
+cc ce7643ae572d4f647141d3d0900cf5c9bde3cd77f0abf9e342033b21f5670374 # shrinks to path = ".", allow_src_only = false, tail = "a.txt"

@@ -1029,4 +1029,65 @@ mod tests {
         assert!(!disabled.enforce_sandbox());
         assert_eq!(disabled.sandbox.profile.engine, SandboxEngine::None);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_raw_tools_config_parse_never_panics_and_diagnostics_stay_coherent(
+                garbage in any::<String>(),
+            ) {
+                drop(RawToolsConfig::parse(&garbage));
+            }
+
+            #[test]
+            fn prop_resolve_skip_gates_removes_inherited_category_gates(
+                cat_gates in prop::collection::vec("[a-z][a-z0-9_]{1,12}", 1..5),
+                tool_gates in prop::collection::vec("[a-z][a-z0-9_]{1,12}", 0..4),
+                skip_first in proptest::bool::ANY,
+            ) {
+                let first_cat_gate = cat_gates.first().cloned().unwrap_or_default();
+                let mut categories = BTreeMap::new();
+                categories.insert(
+                    "checks".to_owned(),
+                    RawTool {
+                        require_gates: Some(cat_gates),
+                        ..Default::default()
+                    },
+                );
+                let mut tools = BTreeMap::new();
+                tools.insert(
+                    "demo".to_owned(),
+                    RawTool {
+                        category: Some("checks".to_owned()),
+                        require_gates: Some(tool_gates.clone()),
+                        skip_gates: if skip_first {
+                            Some(vec![first_cat_gate.clone()])
+                        } else {
+                            None
+                        },
+                        ..Default::default()
+                    },
+                );
+                let cfg = RawToolsConfig {
+                    base_tools: BTreeMap::new(),
+                    categories,
+                    tools,
+                };
+                let resolved = resolve(&cfg);
+                let demo = resolved.iter().find(|t| t.name == "demo").expect("demo resolved");
+                if skip_first && !tool_gates.contains(&first_cat_gate) {
+                    prop_assert!(!demo.preconditions.require_gates.contains(&first_cat_gate));
+                }
+                for g in &tool_gates {
+                    if !(skip_first && g == &first_cat_gate) {
+                        prop_assert!(demo.preconditions.require_gates.contains(g));
+                    }
+                }
+            }
+        }
+    }
 }

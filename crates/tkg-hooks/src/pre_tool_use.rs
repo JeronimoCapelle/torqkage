@@ -559,18 +559,42 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
 
         use super::*;
 
+        fn independent_strictly_inside(raw: &str, scope_dir: &str) -> bool {
+            if raw.is_empty() || raw.contains('\0') || raw.starts_with('/') || raw.starts_with('\\')
+            {
+                return false;
+            }
+            let bytes = raw.as_bytes();
+            if bytes.get(1) == Some(&b':') && bytes.first().is_some_and(u8::is_ascii_alphabetic) {
+                return false;
+            }
+            let mut components = Vec::new();
+            for part in raw.split(['/', '\\']) {
+                match part {
+                    "" | "." => {},
+                    ".." => return false,
+                    other => components.push(other),
+                }
+            }
+            components.first().is_some_and(|first| *first == scope_dir)
+        }
+
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(48))]
+            #![proptest_config(ProptestConfig::with_cases(96))]
 
             #[test]
             fn prop_pre_tool_use_confines_arbitrary_paths_to_allowed_dir_and_blocks_tamper(
                 allowed_dir in "[a-z]{2,8}",
-                arbitrary_path in "[a-zA-Z0-9_./-]{1,35}",
+                arbitrary_path in prop_oneof![
+                    any::<String>(),
+                    "\\PC*",
+                ],
                 mutator_tool in prop_oneof![
                     Just("edit_file"),
                     Just("write_file"),
                     Just("custom_writer"),
                 ],
+                tamper_payload in "\\PC{1,40}",
                 tamper_delta in 1u32..500,
             ) {
                 let dir = std::env::temp_dir().join(format!(
@@ -613,7 +637,8 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
                 let lookalike_res = evaluate_pre_tool_use(&lookalike_input, &dir, &config);
                 prop_assert_ne!(lookalike_res.decision, HookDecision::Allow);
 
-                // 2. Arbitrary path must never return Allow unless cleanly scoped inside `allowed_dir`.
+                // 2. Any arbitrary UTF-8 path must never return Allow unless the independent
+                //    lexical oracle proves it is strictly confined inside `allowed_dir`.
                 let arb_input = PreToolUseInput {
                     tool_call: Some(ToolCallPayload {
                         name: mutator_tool.to_owned(),
@@ -626,20 +651,26 @@ skip_gates = ["vcs_conflicts", "custom_sentinel"]
                     ..Default::default()
                 };
                 let arb_res = evaluate_pre_tool_use(&arb_input, &dir, &config);
-                let in_scope = tkg_common::matches_directory_scope(&arbitrary_path, &allowed_dir);
-                if !in_scope {
-                    prop_assert_ne!(arb_res.decision, HookDecision::Allow);
+                if !independent_strictly_inside(&arbitrary_path, &allowed_dir) {
+                    prop_assert_ne!(
+                        arb_res.decision,
+                        HookDecision::Allow,
+                        "unsafe path unexpectedly allowed: {:?}",
+                        arbitrary_path
+                    );
                 }
 
-                // 3. Code modification inside `allowed_dir/lib.rs` must ALWAYS be denied.
+                // 3. Adversarial code tamper or comment-delimiter injection inside `allowed_dir/lib.rs`
+                //    must NEVER be allowed unless stripped code tokens remain identical.
                 let new_val = 42u32.saturating_add(tamper_delta);
+                let tamper_replacement = format!("{new_val} /* {tamper_payload} */");
                 let tamper_input = PreToolUseInput {
                     tool_call: Some(ToolCallPayload {
                         name: "edit_file".to_owned(),
                         args: json!({
                             "path": format!("{allowed_dir}/lib.rs"),
                             "target": "42",
-                            "replacement": new_val.to_string(),
+                            "replacement": tamper_replacement,
                         }),
                     }),
                     common: tkg_common::models::CommonHookPayload {

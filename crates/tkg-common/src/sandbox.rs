@@ -440,4 +440,140 @@ mod tests {
             "55 30 0:40 / /proc/cpuinfo rw - fuse.lxcfs lxcfs rw\n"
         ));
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_container_detectors_resist_arbitrary_noise(
+                noise in "\\PC*",
+            ) {
+                // Arbitrary non-marker text must never panic cgroup or mountinfo parsers.
+                let cg = cgroup_indicates_container(&noise);
+                let mi = mountinfo_indicates_container(&noise);
+                let generic_line = format!("0::/user.slice/user-1000.slice/{noise}\n");
+                if !noise.contains("docker")
+                    && !noise.contains("containerd")
+                    && !noise.contains("kubepods")
+                    && !noise.contains("libpod")
+                    && !noise.contains("lxc")
+                    && !noise.contains("crio")
+                    && !noise.contains("podman")
+                {
+                    prop_assert!(!cgroup_indicates_container(&generic_line));
+                }
+                if !noise.contains("overlay")
+                    && !noise.contains("docker")
+                    && !noise.contains("lxcfs")
+                    && !noise.contains("containerd")
+                    && !noise.contains("podman")
+                    && !noise.contains("kubepods")
+                {
+                    prop_assert!(!mi);
+                }
+                prop_assert!(!cg || cgroup_indicates_container(&noise));
+            }
+
+            #[test]
+            fn prop_bubblewrap_argv_and_env_isolation_invariants(
+                program in "\\PC{1,20}",
+                args in prop::collection::vec("\\PC{0,20}", 0..6),
+                allow_network in proptest::bool::ANY,
+                unshare_pid in proptest::bool::ANY,
+                secret_key in "SECRET_[A-Z0-9]{4,12}",
+                secret_val in "\\PC{4,24}",
+            ) {
+                let root = Path::new("/tmp/tkg_bwrap_prop_ws");
+                let profile = crate::tools::SandboxProfile {
+                    engine: crate::tools::SandboxEngine::Bwrap,
+                    allow_network,
+                    unshare_pid,
+                    read_only_binds: vec!["/usr".to_owned()],
+                    writable_binds: vec!["{cwd}".to_owned()],
+                    env_passthrough: vec!["CARGO_HOME".to_owned()],
+                };
+                let cmd = build_bubblewrap_command_with_env(
+                    &program,
+                    &args,
+                    &[],
+                    root,
+                    &profile,
+                    |k| {
+                        if k == secret_key {
+                            Some(secret_val.clone())
+                        } else if k == "CARGO_HOME" {
+                            Some("/home/tester/.cargo".to_owned())
+                        } else {
+                            None
+                        }
+                    },
+                );
+                let argv: Vec<String> = cmd
+                    .get_args()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect();
+                if !allow_network && unshare_pid {
+                    prop_assert!(argv.iter().any(|a| a == "--unshare-all"));
+                } else {
+                    prop_assert_eq!(argv.iter().any(|a| a == "--unshare-pid"), unshare_pid);
+                    if allow_network {
+                        prop_assert!(
+                            !argv.iter().any(|a| a == "--unshare-net" || a == "--unshare-all")
+                        );
+                    }
+                }
+                let envs: Vec<String> = cmd
+                    .get_envs()
+                    .map(|(k, _)| k.to_string_lossy().into_owned())
+                    .collect();
+                prop_assert!(!envs.iter().any(|k| k == &secret_key));
+                prop_assert!(envs.iter().any(|k| k == "CARGO_HOME"));
+            }
+
+            #[cfg(unix)]
+            #[test]
+            fn prop_bubblewrap_non_utf8_osstring_root_isolation(
+                raw_bytes in prop::collection::vec(
+                    prop_oneof![Just(0xFFu8), Just(0xFEu8), Just(0x2Fu8), Just(b'a'), Just(b'.')],
+                    1..20,
+                ),
+            ) {
+                use std::os::unix::ffi::OsStringExt;
+
+                let raw_root = std::path::PathBuf::from(std::ffi::OsString::from_vec(raw_bytes));
+                let profile = crate::tools::SandboxProfile {
+                    engine: crate::tools::SandboxEngine::Bwrap,
+                    allow_network: false,
+                    unshare_pid: true,
+                    read_only_binds: vec!["/usr".to_owned()],
+                    writable_binds: vec!["{cwd}".to_owned()],
+                    env_passthrough: vec!["CARGO_HOME".to_owned()],
+                };
+                let cmd = build_bubblewrap_command_with_env(
+                    "echo",
+                    &[],
+                    &[],
+                    &raw_root,
+                    &profile,
+                    |k| match k {
+                        "AWS_SECRET_ACCESS_KEY" => Some("secret".to_owned()),
+                        _ => None,
+                    },
+                );
+                let argv: Vec<String> = cmd
+                    .get_args()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect();
+                prop_assert!(argv.iter().any(|a| a == "--unshare-all"));
+                let envs: Vec<String> = cmd
+                    .get_envs()
+                    .map(|(k, _)| k.to_string_lossy().into_owned())
+                    .collect();
+                prop_assert!(!envs.iter().any(|k| k == "AWS_SECRET_ACCESS_KEY"));
+            }
+        }
+    }
 }

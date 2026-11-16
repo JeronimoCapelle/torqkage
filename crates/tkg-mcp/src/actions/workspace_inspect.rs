@@ -55,4 +55,29 @@ mod tests {
                 .is_err_and(|e| e.contains("must start with an alphanumeric"))
         );
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_workspace_inspect_rejects_all_unsafe_agent_names(
+                raw_agent in any::<String>(),
+            ) {
+                let is_safe = !raw_agent.is_empty()
+                    && raw_agent
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                    && raw_agent.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric());
+
+                if !is_safe {
+                    let args = serde_json::json!({ "agent": raw_agent });
+                    let res = execute(Path::new("."), &args);
+                    prop_assert!(res.is_err(), "unsafe agent name passed validation: {:?}", raw_agent);
+                }
+            }
+        }
+    }
 }

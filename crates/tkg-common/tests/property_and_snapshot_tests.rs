@@ -256,6 +256,7 @@ proptest! {
         val_a in 1u32..500,
         delta in 1u32..500,
         comment_text in "[a-zA-Z0-9 _.:;?!-]{1,60}",
+        evil_payload in "\\PC{1,60}",
     ) {
         let policy = PathPolicy::comments_only("src");
         let val_b = val_a.saturating_add(delta);
@@ -264,10 +265,16 @@ proptest! {
             "/// {comment_text}\npub fn value() -> u32 {{\n    // {comment_text}\n    {val_a}\n}}\n"
         );
         let code_tampered = format!(
-            "/// {comment_text}\npub fn value() -> u32 {{\n    {val_b}\n}}\n"
+            "/// {comment_text}\npub fn value() -> u32 {{\n    {val_b} // {evil_payload}\n}}\n"
+        );
+        // Comment-delimiter escape attempt (`*/ tampered_code /*`) must never pass comments_only.
+        let safe_evil = evil_payload.replace("/*", "").replace("*/", "");
+        let delimiter_smuggle = format!(
+            "/* {safe_evil} */\n// ok\npub fn value() -> u32 {{\n    {val_a} + /* {safe_evil} */ {val_b}\n}}\n"
         );
         prop_assert!(policy.verify(&original, &comment_only).is_ok());
         prop_assert!(policy.verify(&original, &code_tampered).is_err());
+        prop_assert!(policy.verify(&original, &delimiter_smuggle).is_err());
     }
 
     #[test]

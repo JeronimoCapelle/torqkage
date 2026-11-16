@@ -946,4 +946,47 @@ mod tests {
         let go_output = "# pkg/app\n--- FAIL: TestHandler (0.00s)\nFAIL\tpkg/app\t0.005s";
         assert!(extract_compiler_error_signature(go_output, None).is_some());
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_extract_error_signatures_never_panic_and_extract_bracket_codes(
+                arbitrary in any::<String>(),
+                code in "[A-Z][0-9]{4}",
+                prefix in "[a-zA-Z0-9_/: .-]{0,20}",
+            ) {
+                drop(extract_bracketed_error_code(&arbitrary));
+                drop(extract_compiler_error_signature(&arbitrary, None));
+                drop(extract_compiler_error_signature(&arbitrary, Some(&prefix)));
+
+                let rust_err = format!("error[{code}]: {prefix}");
+                prop_assert_eq!(extract_bracketed_error_code(&rust_err), Some(code.clone()));
+                prop_assert_eq!(extract_compiler_error_signature(&rust_err, None), Some(code));
+            }
+
+            #[test]
+            fn prop_hook_payload_and_response_roundtrip_arbitrary_reasons(
+                reason in "\\PC{0,120}",
+                raw_json in any::<String>(),
+            ) {
+                // Arbitrary JSON input never panics PreToolUseInput parser.
+                drop(serde_json::from_str::<PreToolUseInput>(&raw_json));
+
+                let deny = PreToolResponse::deny(&reason);
+                let json_str = serde_json::to_string(&deny).expect("serialize deny");
+                let parsed: serde_json::Value = serde_json::from_str(&json_str).expect("parse deny");
+                prop_assert_eq!(parsed.get("decision").and_then(serde_json::Value::as_str), Some("deny"));
+                prop_assert_eq!(parsed.get("reason").and_then(serde_json::Value::as_str), Some(reason.as_str()));
+
+                let eph = InjectStep::ephemeral(&reason);
+                let eph_json = serde_json::to_string(&eph).expect("serialize eph");
+                let roundtrip: InjectStep = serde_json::from_str(&eph_json).expect("roundtrip eph");
+                prop_assert_eq!(roundtrip, eph);
+            }
+        }
+    }
 }

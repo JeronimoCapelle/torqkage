@@ -1008,6 +1008,30 @@ fn strip_brace_test_items(input: &str, syntax: &SyntaxConfig) -> String {
     out
 }
 
+/// Parses a workspace-relative path into clean non-empty path segments,
+/// rejecting NUL bytes, absolute prefixes (`/`, `\`, drive letters), and `..`
+/// parent-directory traversal components.
+fn safe_relative_components(raw: &str) -> Option<Vec<&str>> {
+    if raw.is_empty() || raw.contains('\0') || raw.starts_with('/') || raw.starts_with('\\') {
+        return None;
+    }
+    let bytes = raw.as_bytes();
+    if bytes.get(1) == Some(&b':') && bytes.first().is_some_and(u8::is_ascii_alphabetic) {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+    for segment in raw.split(['/', '\\']) {
+        match segment {
+            "" | "." => {},
+            ".." => return None,
+            other => parts.push(other),
+        }
+    }
+
+    if parts.is_empty() { None } else { Some(parts) }
+}
+
 /// Helper verifying if a relative path is scoped within a directory name at
 /// root or declared container package level.
 #[must_use]
@@ -1020,19 +1044,19 @@ pub fn matches_directory_scope_with_containers(
     if clean.is_empty() {
         return false;
     }
+    let Some(parts) = safe_relative_components(rel_path) else {
+        return false;
+    };
     if clean == "*" {
         return true;
     }
 
-    let normalized = rel_path.trim_matches(['/', '\\']).replace('\\', "/");
-
     // 1. Root-level match: e.g. "src/lib.rs" matches "src"
-    if normalized == clean || normalized.starts_with(&format!("{clean}/")) {
+    if parts.first().is_some_and(|first| *first == clean) {
         return true;
     }
 
     // 2. Monorepo container match: strictly against declared containers
-    let parts: Vec<&str> = normalized.split('/').collect();
     if let (Some(&container), Some(&sub_dir)) = (parts.first(), parts.get(2))
         && sub_dir == clean
         && containers.iter().any(|c| c == container)
@@ -1124,8 +1148,28 @@ pub fn check_agent_guard_direct(
         return Ok(());
     };
 
-    let relative = candidate.strip_prefix(workspace_root).unwrap_or(candidate);
-    let rel_lossy = relative.to_string_lossy();
+    let relative = match candidate.strip_prefix(workspace_root) {
+        Ok(rel) => rel,
+        Err(_) if candidate.is_absolute() => {
+            return Err(format!(
+                "Security policy violation: Path '{}' is outside workspace root '{}'.",
+                candidate.display(),
+                workspace_root.display()
+            ));
+        },
+        Err(_) => candidate,
+    };
+    let Some(rel_lossy) = relative.to_str() else {
+        return Err(format!(
+            "Security policy violation: Non-UTF-8 path '{}' is rejected by guard.",
+            candidate.display()
+        ));
+    };
+    if safe_relative_components(rel_lossy).is_none() {
+        return Err(format!(
+            "Security policy violation: Unsafe or invalid relative path '{rel_lossy}'."
+        ));
+    }
 
     let project = crate::project::ProjectConfig::detect_or_load(workspace_root);
     let containers = &project.workspace.containers;
@@ -1141,7 +1185,7 @@ pub fn check_agent_guard_direct(
 
     // 2. Check disallowed directories
     for disallowed_dir in &guard.disallowed_dirs {
-        if matches_directory_scope_with_containers(&rel_lossy, disallowed_dir, containers) {
+        if matches_directory_scope_with_containers(rel_lossy, disallowed_dir, containers) {
             return Err(format!(
                 "Security policy violation: Agent '{agent}' is prohibited from modifying files in '{disallowed_dir}/'."
             ));
@@ -1163,7 +1207,7 @@ pub fn check_agent_guard_direct(
         let is_allowed = guard
             .allowed_dirs
             .iter()
-            .any(|dir| matches_directory_scope_with_containers(&rel_lossy, dir, containers));
+            .any(|dir| matches_directory_scope_with_containers(rel_lossy, dir, containers));
 
         if !is_allowed {
             return Err(format!(
@@ -1194,8 +1238,28 @@ pub fn check_agent_path_policies_direct(
     guard: Option<&crate::models::AgentGuard>,
     project: Option<&crate::project::ProjectConfig>,
 ) -> Result<(), String> {
-    let relative = candidate.strip_prefix(workspace_root).unwrap_or(candidate);
-    let rel_lossy = relative.to_string_lossy();
+    let relative = match candidate.strip_prefix(workspace_root) {
+        Ok(rel) => rel,
+        Err(_) if candidate.is_absolute() => {
+            return Err(format!(
+                "Security policy violation: Path '{}' is outside workspace root '{}'.",
+                candidate.display(),
+                workspace_root.display()
+            ));
+        },
+        Err(_) => candidate,
+    };
+    let Some(rel_lossy) = relative.to_str() else {
+        return Err(format!(
+            "Security policy violation: Non-UTF-8 path '{}' is rejected by guard.",
+            candidate.display()
+        ));
+    };
+    if safe_relative_components(rel_lossy).is_none() {
+        return Err(format!(
+            "Security policy violation: Unsafe or invalid relative path '{rel_lossy}'."
+        ));
+    }
 
     let effective_proj = project.map_or_else(
         || {
@@ -1211,8 +1275,8 @@ pub fn check_agent_path_policies_direct(
     let mut applicable_policies: Vec<(Option<String>, PathPolicy)> = Vec::new();
     if let Some(g) = guard {
         for p in &g.path_policies {
-            if matches_directory_scope_with_containers(&rel_lossy, &p.path, containers)
-                || path_matches_pattern(&rel_lossy, &p.path)
+            if matches_directory_scope_with_containers(rel_lossy, &p.path, containers)
+                || path_matches_pattern(rel_lossy, &p.path)
             {
                 applicable_policies.push((agent_name.map(str::to_owned), p.clone()));
             }
@@ -1221,8 +1285,8 @@ pub fn check_agent_path_policies_direct(
 
     // 2. Collect candidate policies from project.toml (workspace-wide)
     for p in effective_proj.all_path_policies() {
-        if matches_directory_scope_with_containers(&rel_lossy, &p.path, containers)
-            || path_matches_pattern(&rel_lossy, &p.path)
+        if matches_directory_scope_with_containers(rel_lossy, &p.path, containers)
+            || path_matches_pattern(rel_lossy, &p.path)
         {
             applicable_policies.push((agent_name.map(str::to_owned), p));
         }

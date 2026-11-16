@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d24f76d549178f4a7e544e8818b63a67b99f6f9cdd1e8fddce011b0563adcacf # shrinks to agent_raw = ""
+cc 27ff69f3bd5a11bf30724c35983236bdb08ed9b87dcca133c95a1b98edfe5588 # shrinks to val_errors = ["Security policy violation: outside workspace"], arbitrary_err_output = "0", agent_name = "a0"

@@ -377,6 +377,8 @@ pub(crate) fn dispatch_action(
                 .get("agent")
                 .or_else(|| arguments.get("name"))
                 .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
                 .ok_or_else(|| "Missing required parameter 'agent'".to_owned())?;
 
             tkg_common::set_active_agent(workspace_root, target_agent)
@@ -991,5 +993,136 @@ mod tests {
         tool.error_fallback = Some("token_smart_not_found".to_owned());
         let (smart_msg, _) = process_command_output(&output, &tool, "custom");
         assert!(!smart_msg.contains("Item not found in module tree"));
+    }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(96))]
+
+            #[test]
+            fn prop_circuit_breaker_validation_noise_and_reset_invariants(
+                val_errors in prop::collection::vec(
+                    prop_oneof![
+                        Just("Validation error: bad enum".to_owned()),
+                        Just("Missing required argument 'target'".to_owned()),
+                        Just("Parameter conflict: mutually exclusive flags".to_owned()),
+                    ],
+                    0..5,
+                ),
+                arbitrary_err_output in "\\PC{1,60}",
+                agent_name in "[a-z][a-z0-9_-]{1,16}",
+            ) {
+                let temp_dir = std::env::temp_dir().join(format!(
+                    "mcp_cb_prop_{}_{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock")
+                        .as_nanos()
+                ));
+                _ = std::fs::create_dir_all(&temp_dir);
+
+                let tool = ToolDefinition {
+                    name: "quick_check".to_owned(),
+                    safety: tkg_common::tools::ToolSafetyPolicy {
+                        tracks_circuit_breaker: true,
+                        ..Default::default()
+                    },
+                    action: ToolAction::StaticCommand,
+                    ..Default::default()
+                };
+
+                // Repeated validation/guard errors must NEVER trip or increment the breaker.
+                for err_msg in &val_errors {
+                    let res = update_circuit_breaker(
+                        &tool,
+                        &temp_dir,
+                        Some(&agent_name),
+                        Err(err_msg.clone()),
+                        false,
+                    );
+                    prop_assert!(res.is_err());
+                }
+                let ledger_before = CircuitBreakerLedger::load(&temp_dir);
+                prop_assert_eq!(ledger_before.consecutive_failures, 0);
+                prop_assert!(!ledger_before.tripped);
+
+                // First tool execution failure increments to 1, second same-class trips, success resets.
+                let first = update_circuit_breaker(
+                    &tool,
+                    &temp_dir,
+                    Some(&agent_name),
+                    Ok((arbitrary_err_output.clone(), true)),
+                    false,
+                )
+                .expect("first failure tracked");
+                prop_assert!(first.1);
+
+                let second = update_circuit_breaker(
+                    &tool,
+                    &temp_dir,
+                    Some(&agent_name),
+                    Ok((arbitrary_err_output, true)),
+                    false,
+                )
+                .expect("second failure tracked");
+                prop_assert!(second.1);
+                prop_assert!(CircuitBreakerLedger::load(&temp_dir).tripped);
+
+                let recovered = update_circuit_breaker(
+                    &tool,
+                    &temp_dir,
+                    Some(&agent_name),
+                    Ok(("ok".to_owned(), false)),
+                    false,
+                )
+                .expect("recovery tracked");
+                prop_assert!(!recovered.1);
+                let ledger_after = CircuitBreakerLedger::load(&temp_dir);
+                prop_assert_eq!(ledger_after.consecutive_failures, 0);
+                prop_assert!(!ledger_after.tripped);
+
+                _ = std::fs::remove_dir_all(&temp_dir);
+            }
+
+            #[test]
+            fn prop_dispatch_set_active_agent_handles_arbitrary_strings(
+                agent_raw in any::<String>(),
+            ) {
+                let temp_dir = std::env::temp_dir().join(format!(
+                    "mcp_set_agent_prop_{}_{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock")
+                        .as_nanos()
+                ));
+                _ = std::fs::create_dir_all(&temp_dir);
+
+                let tool = ToolDefinition {
+                    name: "set_active_agent".to_owned(),
+                    action: ToolAction::SetActiveAgent,
+                    ..Default::default()
+                };
+                let args = serde_json::json!({ "agent": agent_raw });
+                let guards = BTreeMap::new();
+                let tools = vec![tool.clone()];
+
+                let res = dispatch_action(&tool, &temp_dir, &args, None, &guards, &tools, false);
+                if agent_raw.trim().is_empty() {
+                    prop_assert!(res.is_err());
+                } else {
+                    let (msg, is_err) = res.expect("non-empty agent name should persist");
+                    prop_assert!(!is_err);
+                    prop_assert!(msg.contains(agent_raw.trim()));
+                }
+
+                _ = std::fs::remove_dir_all(&temp_dir);
+            }
+        }
     }
 }

@@ -372,4 +372,32 @@ pre_launch_checks: []
             GateCheckStatus::Failed("error".to_owned())
         );
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_parse_pre_launch_checks_arbitrary_input_never_panics(
+                arbitrary in "\\PC*",
+                gates in prop::collection::vec("[a-z][a-z0-9_]{1,16}", 0..5),
+            ) {
+                // Arbitrary garbage must never panic the parser.
+                let parsed_garbage = parse_pre_launch_checks(&arbitrary);
+                prop_assert!(parsed_garbage.len() <= arbitrary.lines().count() + 1);
+
+                // Well-formed frontmatter always roundtrips exact gate names.
+                let mut doc = String::from("---\nname: agent\npre_launch_checks:\n");
+                for g in &gates {
+                    doc.push_str("  - ");
+                    doc.push_str(g);
+                    doc.push('\n');
+                }
+                doc.push_str("---\nBody\n");
+                prop_assert_eq!(parse_pre_launch_checks(&doc), gates);
+            }
+        }
+    }
 }

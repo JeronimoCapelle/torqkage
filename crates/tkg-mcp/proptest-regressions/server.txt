@@ -5,3 +5,5 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc a04524c9a17f86d51d95d7e8d31b6986c5e1afeb58e1aadc525addc7a17fb9e2 # shrinks to method = "tools/call", tool_name = "_", raw_path = "Cargo.toml", call_id = 1
+cc a2237f7f38208d62d6a5a85508e9846ab880bbd8c16ac88069117398923ad5be # shrinks to method = "", tool_name = "", raw_path = "ῖ", call_id = 1
+cc 3d463ab2d4e4b82c7bceb9151f892460caef95f206f6e0e68a12711d85508e05 # shrinks to method = "", tool_name = "", raw_path = "..𖫐", call_id = 1

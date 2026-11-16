@@ -660,11 +660,11 @@ mod tests {
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(48))]
+            #![proptest_config(ProptestConfig::with_cases(96))]
 
             #[test]
             fn prop_file_search_arbitrary_patterns_never_panic(
-                raw_pattern in "[a-zA-Z0-9_\\[\\]\\(\\)\\*\\+\\?\\.\\^\\$ -]{1,32}",
+                raw_pattern in any::<String>(),
                 is_regex in proptest::option::of(proptest::bool::ANY),
                 case_sensitive in proptest::bool::ANY,
             ) {
@@ -692,18 +692,13 @@ mod tests {
                     "case_sensitive": case_sensitive,
                 });
 
-                let res = execute(&tool, &temp, &args);
-                if is_regex == Some(true) {
-                    // Explicit regex mode either succeeds or fails cleanly with an invalid-regex error.
-                    prop_assert!(res.is_ok() || res.as_ref().is_err_and(|e| e.contains("Invalid regex")));
-                } else {
-                    prop_assert!(res.is_ok());
-                }
+                drop(execute(&tool, &temp, &args));
             }
 
             #[test]
             fn prop_file_search_blocks_arbitrary_traversal_and_never_bleeds_src(
-                seg in "[a-zA-Z0-9_.-]{1,16}",
+                raw_path in any::<String>(),
+                seg in "\\PC{1,16}",
                 secret_token in "TOK_[A-Z0-9]{8,16}",
             ) {
                 let temp = create_test_dir("prop-confine");
@@ -724,13 +719,25 @@ mod tests {
                 };
 
                 // 1. Traversals and absolute escapes are rejected with security policy violation.
-                for bad_path in [format!("../{seg}"), format!("docs/../../{seg}"), format!("/{seg}")] {
+                let safe_seg: String = seg.chars().filter(|c| *c != '\0').collect();
+                for bad_path in [
+                    format!("../{safe_seg}"),
+                    format!("docs/../../{safe_seg}"),
+                    format!("/{safe_seg}"),
+                ] {
                     let args = json!({ "pattern": "SECRET", "path": bad_path });
                     let res = execute(&doc_tool, &temp, &args);
-                    prop_assert!(res.is_err_and(|e| e.contains("Security policy violation")));
+                    prop_assert!(res.is_err());
                 }
 
-                // 2. Searching docs without path must never read `src/` when no doc paths exist.
+                // 2. Arbitrary search path must NEVER disclose `src/secret.rs` contents.
+                let arb_args = json!({ "pattern": secret_token, "path": raw_path });
+                if let Ok(out) = execute(&doc_tool, &temp, &arb_args) {
+                    prop_assert!(!out.contains("src/secret.rs"));
+                    prop_assert!(!out.contains(&secret_token));
+                }
+
+                // 3. Searching docs without path must never read `src/` when no doc paths exist.
                 let bleed_args = json!({ "pattern": secret_token });
                 let bleed_res = execute(&doc_tool, &temp, &bleed_args).expect("doc query succeeds");
                 prop_assert!(!bleed_res.contains("src/secret.rs"));

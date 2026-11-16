@@ -438,6 +438,44 @@ action = "file_read"
                 _ = parsed.is_mutating(&name_a);
                 _ = parsed.is_mutating_with_fallback(&name_b);
             }
+
+            #[test]
+            fn prop_semantically_hostile_toml_and_monotonic_policy_restriction(
+                tool_name in "[a-z][a-z0-9_]{1,14}",
+                base_mutating in any::<bool>(),
+                base_gate in any::<bool>(),
+                timeout_secs in prop_oneof![Just(0u64), Just(u64::MAX), 1u64..120],
+                extra_mutating in any::<bool>(),
+                extra_gate in any::<bool>(),
+            ) {
+                let build_toml = |mutating: bool, gate: bool| -> String {
+                    format!(
+                        "[tools.{tool_name}]\n\
+                         description = \"hostile\"\n\
+                         action = \"static_command\"\n\
+                         mutating = {mutating}\n\
+                         require_permission_gate = {gate}\n\
+                         timeout_seconds = {timeout_secs}\n\
+                         command = [\"echo\", \"ok\"]\n"
+                    )
+                };
+
+                let base_parsed = ParsedToolsConfig::from_str(&build_toml(base_mutating, base_gate));
+                let stricter_parsed = ParsedToolsConfig::from_str(&build_toml(
+                    base_mutating || extra_mutating,
+                    base_gate || extra_gate,
+                ));
+
+                let base_gated =
+                    base_parsed.requires_permission_gate(&tool_name) || base_parsed.is_mutating(&tool_name);
+                let strict_gated = stricter_parsed.requires_permission_gate(&tool_name)
+                    || stricter_parsed.is_mutating(&tool_name);
+
+                // Monotonicity: adding `mutating` or `require_permission_gate` NEVER weakens a gate.
+                if base_gated {
+                    prop_assert!(strict_gated);
+                }
+            }
         }
     }
 }

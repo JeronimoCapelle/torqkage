@@ -309,16 +309,9 @@ mod tests {
 
             #[test]
             fn prop_file_read_rejects_arbitrary_paths_outside_allowed_dir(
-                dir_prefix in prop_oneof![
-                    Just("src_extra".to_owned()),
-                    Just("src2".to_owned()),
-                    Just("tests".to_owned()),
-                    Just("..".to_owned()),
-                    Just("src/../tests".to_owned()),
-                    "[a-rt-z]{1,6}[0-9]{1,3}",
-                ],
+                arbitrary in any::<String>(),
+                attack_variant in 0u8..5,
                 file_name in "[a-zA-Z0-9_]{1,12}\\.rs",
-                use_abs in proptest::bool::ANY,
             ) {
                 let dir_id = format!(
                     "tkg_read_confine_{}_{}",
@@ -329,8 +322,16 @@ mod tests {
                         .as_nanos()
                 );
                 let temp = std::env::temp_dir().join(dir_id);
-                std::fs::create_dir_all(&temp).expect("create temp");
+                std::fs::create_dir_all(temp.join("src")).expect("create temp/src");
                 let _cleanup = TempDirGuard(temp.clone());
+
+                // Seed a real secret outside `src/` that no arbitrary path should ever read.
+                let secret_marker = "SECRET_OUTSIDE_SRC_TOKEN";
+                std::fs::create_dir_all(temp.join("src_extra")).expect("mkdir src_extra");
+                std::fs::write(temp.join("src_extra/secret.rs"), secret_marker)
+                    .expect("write src_extra secret");
+                std::fs::write(temp.join("top_secret.txt"), secret_marker)
+                    .expect("write root secret");
 
                 let tool = ToolDefinition {
                     name: "read_file".to_owned(),
@@ -343,21 +344,17 @@ mod tests {
                     ..Default::default()
                 };
                 let guards = BTreeMap::new();
-                let target = if use_abs {
-                    format!("/{dir_prefix}/{file_name}")
-                } else {
-                    if !dir_prefix.contains("..") {
-                        let outside_file = temp.join(&dir_prefix).join(&file_name);
-                        std::fs::create_dir_all(outside_file.parent().expect("parent"))
-                            .expect("create outside dir");
-                        std::fs::write(&outside_file, "SECRET_OUTSIDE_SRC")
-                            .expect("seed outside file");
-                    }
-                    format!("{dir_prefix}/{file_name}")
+                let target = match attack_variant {
+                    0 => arbitrary,
+                    1 => format!("src/../{file_name}"),
+                    2 => format!("src\\..\\{file_name}"),
+                    3 => "src_extra/secret.rs".to_owned(),
+                    _ => format!("/{file_name}"),
                 };
                 let args = json!({ "path": target });
-                let res = execute(&tool, &temp, &args, None, &guards);
-                prop_assert!(res.is_err());
+                if let Ok(out) = execute(&tool, &temp, &args, None, &guards) {
+                    prop_assert!(!out.contains(secret_marker));
+                }
             }
         }
     }

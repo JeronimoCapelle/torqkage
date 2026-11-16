@@ -574,4 +574,65 @@ mod tests {
             .collect();
         assert_eq!(args, vec!["run", "--agent", "reviewer"]);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_pre_launch_report_and_modified_gate_invariants(
+                agent_name in "\\PC{1,30}",
+                errors in prop::collection::vec("\\PC{1,40}", 0..6),
+                modified in proptest::bool::ANY,
+            ) {
+                let mut report = PreLaunchReport::new(&agent_name);
+                for err in &errors {
+                    report.errors.push(err.clone());
+                }
+                prop_assert_eq!(report.is_ok(), errors.is_empty());
+                let diag = report.format_diagnostics();
+                prop_assert!(diag.contains(&agent_name));
+                for err in &errors {
+                    prop_assert!(diag.contains(err));
+                }
+
+                let manifest = AgentManifest {
+                    file_path: PathBuf::from("nonexistent.md"),
+                    name: agent_name,
+                    description: String::new(),
+                    effort: "low".to_owned(),
+                    permission_mode: "acceptEdits".to_owned(),
+                    command_execution_policy: "off".to_owned(),
+                    role_flags: AgentRoleFlags {
+                        main_agent: false,
+                        subagent: true,
+                    },
+                    inherit_mcp: false,
+                    allowed_subagents: Vec::new(),
+                    pre_launch_checks: Vec::new(),
+                    allowed_dirs: Vec::new(),
+                    disallowed_dirs: Vec::new(),
+                    allowed_files: Vec::new(),
+                    disallowed_files: Vec::new(),
+                    path_policies: Vec::new(),
+                    native_tools: Vec::new(),
+                    mcp_tools: Vec::new(),
+                    directives: String::new(),
+                    modified,
+                };
+                let launch_report = run_pre_launch_checks(Path::new("."), &manifest);
+                if modified {
+                    prop_assert!(!launch_report.is_ok());
+                    prop_assert!(
+                        launch_report
+                            .errors
+                            .iter()
+                            .any(|e| e.contains("unsaved modifications"))
+                    );
+                }
+            }
+        }
+    }
 }

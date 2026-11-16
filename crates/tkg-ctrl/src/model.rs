@@ -473,4 +473,57 @@ You are a test agent. Always pass tests.
 
         _ = fs::remove_dir_all(&temp_dir);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_tool_category_normalization_and_markdown_parser_invariants(
+                raw_cat in prop::option::of(any::<String>()),
+                arbitrary_md in any::<String>(),
+                tool_name in "[a-z][a-z0-9_]{1,14}",
+                enable_gate in proptest::bool::ANY,
+            ) {
+                let item = ToolItem::from_definition(ToolDefinition {
+                    name: tool_name.clone(),
+                    category: raw_cat.clone(),
+                    ..Default::default()
+                });
+                let expected = raw_cat
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map_or_else(|| "Tools".to_owned(), ToOwned::to_owned);
+                prop_assert_eq!(item.category, expected);
+
+                // Arbitrary markdown/YAML input never panics parse_agent_markdown.
+                drop(parse_agent_markdown(PathBuf::from("prop.md"), &arbitrary_md));
+
+                let temp_dir = std::env::temp_dir().join(format!(
+                    "tkg_model_prop_{}_{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock")
+                        .as_nanos()
+                ));
+                _ = fs::create_dir_all(&temp_dir);
+                let toml_file = temp_dir.join("tools.toml");
+                let initial = format!(
+                    "# Header comment\n[tools.{tool_name}]\n# Keep comment\ncommand = [\"echo\", \"ok\"]\n"
+                );
+                fs::write(&toml_file, initial).expect("write tools.toml");
+                update_tool_permission_gate_in_file(&toml_file, &tool_name, enable_gate)
+                    .expect("toggle gate");
+                let updated = fs::read_to_string(&toml_file).expect("read tools.toml");
+                prop_assert!(updated.contains("# Keep comment"));
+                prop_assert_eq!(updated.contains("require_permission_gate = true"), enable_gate);
+
+                _ = fs::remove_dir_all(&temp_dir);
+            }
+        }
+    }
 }

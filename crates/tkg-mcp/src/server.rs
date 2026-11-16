@@ -1034,23 +1034,20 @@ mod tests {
         use super::*;
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(48))]
+            #![proptest_config(ProptestConfig::with_cases(96))]
 
             #[test]
             fn prop_server_adversarial_rpc_scoping_and_breaker(
-                method in prop_oneof![
-                    Just("tools/call"),
-                    Just("resources/read"),
-                    Just("prompts/get"),
-                    Just("unknown/method"),
-                ],
-                tool_name in "[a-z_]{1,20}",
+                method in any::<String>(),
+                tool_name in any::<String>(),
                 raw_path in prop_oneof![
-                    Just("../../etc/passwd"),
-                    Just(".git/config"),
-                    Just("Cargo.toml"),
-                    Just("package.json"),
-                    Just("src/clean.rs"),
+                    any::<String>(),
+                    "\\PC*",
+                    Just("../../etc/passwd".to_owned()),
+                    Just(".git/config".to_owned()),
+                    Just("Cargo.toml".to_owned()),
+                    Just("package.json".to_owned()),
+                    Just("src/clean.rs".to_owned()),
                 ],
                 call_id in 1i64..1000,
             ) {
@@ -1118,7 +1115,7 @@ mod tests {
                 let arb_resp = server.handle_request(JsonRpcRequest {
                     jsonrpc: "2.0".to_owned(),
                     id: Some(json!(call_id)),
-                    method: method.to_owned(),
+                    method,
                     params: Some(json!({ "name": tool_name, "arguments": { "path": raw_path } })),
                 });
                 prop_assert!(arb_resp.is_some());
@@ -1198,22 +1195,42 @@ mod tests {
                     Some("guarded_writer".to_owned()),
                     guarded_map,
                 );
-                if raw_path != "src/clean.rs" {
-                    let guarded_resp = guarded_server
-                        .handle_request(JsonRpcRequest {
-                            jsonrpc: "2.0".to_owned(),
-                            id: Some(json!(call_id + 3)),
-                            method: "tools/call".to_owned(),
-                            params: Some(json!({
-                                "name": "write_project_file",
-                                "arguments": { "path": raw_path, "content": "pwn" }
-                            })),
-                        })
-                        .expect("guarded response");
-                    if let Some(res) = guarded_resp.result {
-                        prop_assert_eq!(&res["isError"], &json!(true));
-                    }
+                // Protected manifests, traversal (`..`, `\`, `\0`), or absolute paths MUST always
+                // be rejected by `guarded_writer`; any permitted relative write must stay under `src/`.
+                let is_dangerous_input = raw_path
+                    .split(['/', '\\'])
+                    .any(|seg| seg == "..")
+                    || raw_path.contains('\0')
+                    || raw_path.starts_with('/')
+                    || raw_path.starts_with('\\')
+                    || raw_path == "Cargo.toml"
+                    || raw_path == "package.json"
+                    || raw_path == ".git/config";
+                let guarded_resp = guarded_server
+                    .handle_request(JsonRpcRequest {
+                        jsonrpc: "2.0".to_owned(),
+                        id: Some(json!(call_id + 3)),
+                        method: "tools/call".to_owned(),
+                        params: Some(json!({
+                            "name": "write_project_file",
+                            "arguments": { "path": raw_path, "content": "pwn" }
+                        })),
+                    })
+                    .expect("guarded response");
+                if is_dangerous_input && let Some(res) = guarded_resp.result {
+                    prop_assert_eq!(&res["isError"], &json!(true));
                 }
+                for entry in std::fs::read_dir(&temp_dir).expect("ls temp").flatten() {
+                    let fname = entry.file_name();
+                    prop_assert!(
+                        fname == "src" || fname == "plugins" || fname == "Cargo.toml",
+                        "unexpected root entry created: {:?}",
+                        fname
+                    );
+                }
+                let cargo_toml_contents = std::fs::read_to_string(temp_dir.join("Cargo.toml"))
+                    .expect("read Cargo.toml");
+                prop_assert_eq!(cargo_toml_contents, "[package]\nname = \"x\"\n");
 
                 _ = std::fs::remove_dir_all(&temp_dir);
             }

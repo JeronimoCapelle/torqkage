@@ -1704,9 +1704,9 @@ mod tests {
             #[test]
             fn prop_add_tool_escapes_toml_and_rejects_bad_names(
                 valid_name in "[a-z][a-z0-9_-]{1,18}",
-                bad_char in prop_oneof![Just(" "), Just("."), Just("/"), Just(";"), Just("=")],
-                description in "[a-zA-Z0-9 #\"\\\\_-]{0,60}",
-                cmd_args in prop::collection::vec("[a-zA-Z0-9_./:-]{1,15}", 1..5),
+                bad_tail in "\\PC{1,20}",
+                description in "\\PC{0,80}",
+                cmd_args in prop::collection::vec("\\PC{1,20}", 1..5),
             ) {
                 let dir = tempfile::tempdir().expect("tempdir");
                 fs::create_dir_all(dir.path().join(".tkg")).expect("mkdir .tkg");
@@ -1734,6 +1734,10 @@ mod tests {
                 prop_assert!(parsed.is_ok());
 
                 // Any invalid character in tool name must be rejected cleanly.
+                let bad_char = bad_tail
+                    .chars()
+                    .find(|c| !c.is_ascii_alphanumeric() && *c != '_' && *c != '-')
+                    .unwrap_or(' ');
                 let bad_name = format!("{valid_name}{bad_char}tail");
                 let mut raw_bad = vec![bad_name, "--".to_owned(), "echo".to_owned()];
                 let bad_parsed = parse_add_args(&raw_bad);

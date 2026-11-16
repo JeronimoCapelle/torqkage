@@ -1947,4 +1947,44 @@ mod tests {
             .collect();
         assert_eq!(gem_args, vec!["--resume", "gem-7", "-p", "review diff"]);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_resolve_and_client_name_never_panic_on_arbitrary_strings(
+                raw_client in any::<String>(),
+                harness_idx in 0usize..11,
+                agent in prop::option::of("\\PC{0,30}"),
+                prompt in prop::option::of("\\PC{0,60}"),
+                session in prop::option::of("[a-zA-Z0-9_-]{1,20}"),
+                sandbox in proptest::bool::ANY,
+            ) {
+                let resolved_dyn = resolve(&raw_client);
+                prop_assert!(!resolved_dyn.id().is_empty() || raw_client.trim().is_empty() || resolved_dyn.id() == "agy");
+                let resolved_client = resolve_client_name(&raw_client);
+                let _ = resolved_client.supports_hooks();
+
+                let slugs = [
+                    "claude", "codex", "gemini", "cursor", "github-copilot",
+                    "vscode", "opencode", "windsurf", "roo", "cline", "agy",
+                ];
+                let slug = slugs.get(harness_idx).copied().unwrap_or("claude");
+                let r = runner(slug);
+                let cmd = r.harness().build_spawn_cmd(
+                    Path::new("/ws"),
+                    &r,
+                    agent.as_deref(),
+                    prompt.as_deref(),
+                    session.as_deref(),
+                    sandbox,
+                    &BTreeMap::new(),
+                );
+                prop_assert!(!cmd.get_program().is_empty());
+            }
+        }
+    }
 }

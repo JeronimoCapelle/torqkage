@@ -368,4 +368,97 @@ mod tests {
         assert_eq!(arr_strs("b"), vec!["one", "two"]);
         assert_eq!(arr_strs("c"), vec!["alpha", "beta"]);
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        #[derive(Debug, Clone, Copy)]
+        enum StrategyKind {
+            Replace,
+            Append,
+            Prepend,
+            Unique,
+        }
+
+        impl StrategyKind {
+            const fn as_str(self) -> &'static str {
+                match self {
+                    Self::Replace => "replace",
+                    Self::Append => "append",
+                    Self::Prepend => "prepend",
+                    Self::Unique => "unique",
+                }
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn prop_deep_merge_toml_strategies_preserve_order_and_uniqueness(
+                base_items in prop::collection::vec("[a-z0-9_]{1,10}", 0..6),
+                overlay_items in prop::collection::vec("[a-z0-9_]{1,10}", 0..6),
+                strategy in prop_oneof![
+                    Just(StrategyKind::Replace),
+                    Just(StrategyKind::Append),
+                    Just(StrategyKind::Prepend),
+                    Just(StrategyKind::Unique),
+                ],
+                extra_key in "[a-z][a-z0-9_]{1,10}",
+                extra_val in "\\PC{0,30}",
+            ) {
+                let mut base = toml::Table::new();
+                let mut sec = toml::Table::new();
+                sec.insert(
+                    "items".to_owned(),
+                    toml::Value::Array(base_items.iter().cloned().map(toml::Value::String).collect()),
+                );
+                sec.insert("keep".to_owned(), toml::Value::String(extra_val.clone()));
+                base.insert("sec".to_owned(), toml::Value::Table(sec));
+
+                let mut overlay = toml::Table::new();
+                let mut o_sec = toml::Table::new();
+                o_sec.insert("merge_strategy".to_owned(), toml::Value::String(strategy.as_str().to_owned()));
+                o_sec.insert(
+                    "items".to_owned(),
+                    toml::Value::Array(overlay_items.iter().cloned().map(toml::Value::String).collect()),
+                );
+                o_sec.insert(extra_key.clone(), toml::Value::String(extra_val.clone()));
+                overlay.insert("sec".to_owned(), toml::Value::Table(o_sec));
+
+                deep_merge_toml(&mut base, overlay);
+
+                let sec_tbl = base.get("sec").and_then(toml::Value::as_table).expect("sec table");
+                prop_assert!(sec_tbl.get("merge_strategy").is_none());
+                prop_assert_eq!(sec_tbl.get(&extra_key).and_then(toml::Value::as_str), Some(extra_val.as_str()));
+                let merged: Vec<&str> = sec_tbl
+                    .get("items")
+                    .and_then(toml::Value::as_array)
+                    .expect("items")
+                    .iter()
+                    .filter_map(toml::Value::as_str)
+                    .collect();
+
+                match strategy {
+                    StrategyKind::Replace => prop_assert_eq!(merged, overlay_items.iter().map(String::as_str).collect::<Vec<_>>()),
+                    StrategyKind::Append => prop_assert_eq!(merged.len(), base_items.len() + overlay_items.len()),
+                    StrategyKind::Prepend => prop_assert_eq!(merged.len(), base_items.len() + overlay_items.len()),
+                    StrategyKind::Unique => {
+                        for item in base_items.iter().chain(overlay_items.iter()) {
+                            prop_assert!(merged.contains(&item.as_str()));
+                        }
+                    },
+                }
+            }
+
+            #[test]
+            fn prop_cascade_layer_str_fails_closed_on_arbitrary_invalid_toml(
+                garbage in any::<String>(),
+            ) {
+                let mut loader = CascadedConfigLoader::new();
+                // Arbitrary text either parses as a valid TOML table or returns a structured ConfigParse error without panicking.
+                drop(loader.layer_str(None, &garbage));
+            }
+        }
+    }
 }

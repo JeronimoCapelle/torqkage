@@ -735,4 +735,66 @@ mod tests {
             Some("deny")
         );
     }
+
+    mod prop_tests {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #[test]
+            fn prop_dialects_never_panic_and_preserve_tool_and_cwd_across_arbitrary_values(
+                arbitrary in any::<String>(),
+                tool_name in "[a-zA-Z0-9_.-]{1,20}",
+                file_path in "[a-zA-Z0-9_./-]{1,30}",
+                cmd_str in "\\PC{1,40}",
+            ) {
+                let detected = detect_payload_dialect(&arbitrary);
+                if is_claude_payload(&arbitrary) {
+                    prop_assert_eq!(detected, Some(WireDialectHint::ClaudeCode));
+                }
+                drop(CLAUDE_CODE_DIALECT.parse_pre_tool_use(&arbitrary));
+                drop(GEMINI_CLI_DIALECT.parse_pre_tool_use(&arbitrary));
+                drop(CURSOR_DIALECT.parse_pre_tool_use(&arbitrary));
+                drop(GITHUB_COPILOT_DIALECT.parse_pre_tool_use(&arbitrary));
+
+                // Cursor beforeShellExecution normalizes command cleanly.
+                let cursor_payload = serde_json::json!({
+                    "conversation_id": "c-prop",
+                    "cwd": "/ws",
+                    "hook_event_name": "beforeShellExecution",
+                    "command": cmd_str,
+                })
+                .to_string();
+                let parsed_cursor = CURSOR_DIALECT
+                    .parse_pre_tool_use(&cursor_payload)
+                    .expect("cursor parse");
+                let cursor_tc = parsed_cursor.tool_call.expect("cursor tc");
+                prop_assert_eq!(cursor_tc.name, "Shell");
+                prop_assert_eq!(
+                    cursor_tc.args.get("command").and_then(serde_json::Value::as_str),
+                    Some(cmd_str.as_str())
+                );
+
+                // GitHub Copilot camelCase toolArgs preserves nested JSON path.
+                let inner_args = serde_json::json!({ "path": file_path }).to_string();
+                let copilot_payload = serde_json::json!({
+                    "cwd": "/ws",
+                    "hook_event_name": "preToolUse",
+                    "toolName": tool_name,
+                    "toolArgs": inner_args,
+                })
+                .to_string();
+                let parsed_copilot = GITHUB_COPILOT_DIALECT
+                    .parse_pre_tool_use(&copilot_payload)
+                    .expect("copilot parse");
+                let copilot_tc = parsed_copilot.tool_call.expect("copilot tc");
+                prop_assert_eq!(copilot_tc.name, tool_name);
+                prop_assert_eq!(
+                    copilot_tc.args.get("path").and_then(serde_json::Value::as_str),
+                    Some(file_path.as_str())
+                );
+            }
+        }
+    }
 }

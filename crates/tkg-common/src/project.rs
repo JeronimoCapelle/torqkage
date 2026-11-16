@@ -176,7 +176,17 @@ pub fn check_dangerous_files_with_security(
 ) -> Result<(), String> {
     use crate::content_filter::path_matches_pattern;
 
-    let path_str = path.to_string_lossy().replace('\\', "/");
+    let Some(raw_str) = path.to_str() else {
+        return Err(format!(
+            "Security policy violation: Non-UTF-8 path '{}' is blocked.",
+            path.display()
+        ));
+    };
+    if raw_str.contains('\0') {
+        return Err("Security policy violation: Path containing NUL byte is blocked.".to_owned());
+    }
+
+    let path_str = raw_str.replace('\\', "/");
     let lossy_lower = path_str.to_lowercase();
 
     // 1. Extra banned patterns always take precedence and reject
